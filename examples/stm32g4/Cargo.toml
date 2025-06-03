@@ -1,0 +1,67 @@
+[package]
+name = "bq25730_stm32g431cbu6_example"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
+  "defmt",
+  "time-driver-any",
+  "stm32g431cb",
+  "memory-x",
+  "unstable-pac",
+  "exti",
+] }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
+  "arch-cortex-m",
+  "executor-thread",
+  "defmt",
+] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
+  "defmt",
+  "defmt-timestamp-uptime",
+  "tick-hz-32_768",
+] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
+  "defmt",
+] }
+
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
+
+cortex-m = { version = "0.7.7", features = [
+  "inline-asm",
+  "critical-section-single-core",
+] }
+cortex-m-rt = "0.7.5"
+embedded-hal = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+portable-atomic = { version = "1.11.0", features = ["critical-section"] }
+static_cell = "2.0.0"
+
+embedded-graphics = "0.8.1"
+
+gc9d01 = { version = "*", path = "../../", features = ["async", "defmt"] }
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 3
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = 0
+strip = "symbols"
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false
+
+[[bin]]
+name = "bq25730_stm32g431cbu6_example"
+path = "src/main.rs"

@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "conport": {
+      "command": "/Volumes/ExData/mcp-servers/.venv/bin/python",
+      "args": [
+        "-m",
+        "context_portal_mcp.main",
+        "--mode",
+        "stdio",
+        "--workspace_id",
+        "${workspaceFolder}",
+        "--log-file",
+        "./logs/conport.log",
+        "--log-level",
+        "INFO"
+      ],
+      "alwaysAllow": [],
+      "disabled": false
+    }
+  }
+}
