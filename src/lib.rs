@@ -161,7 +161,7 @@ pub enum Instruction {
 pub enum Orientation {
     Portrait = 0x00,
     Landscape = 0x60,
-    PortraitSwapped = 0xC0,
+    PortraitSwapped = 0x80,
     LandscapeSwapped = 0xA0,
 }
 
