@@ -1,5 +1,5 @@
 [package]
-name = "bq25730_stm32g431cbu6_example"
+name = "gc9d01_stm32g431cbu6_example"
 version = "0.1.0"
 edition = "2024"
 
