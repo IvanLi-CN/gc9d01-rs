@@ -11,6 +11,15 @@ use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 use defmt::*;
 
+// Screen orientation enumeration for GC9D01
+#[derive(Clone, Copy, Debug)]
+pub enum ScreenOrientation {
+    Portrait = 0x00,        // 0°
+    Landscape = 0x60,       // 90°
+    PortraitSwapped = 0x80, // 180°
+    LandscapeSwapped = 0xA0, // 270°
+}
+
 // GC9D01 initialization function following the official reference document
 async fn initialize_gc9d01(
     spi: &mut Spi<'_, Async>,
@@ -323,21 +332,53 @@ async fn main(_spawner: Spawner) {
 
 
 
-    // Fill area with solid color - optimized batch version
+    // Fill area with solid color - optimized batch version with orientation support
     async fn fill_area_with_color(
         spi: &mut Spi<'_, Async>,
         cs: &mut Output<'_>,
         dc: &mut Output<'_>,
         x0: u16, y0: u16, x1: u16, y1: u16,
-        color: u16
+        color: u16,
+        orientation: ScreenOrientation
     ) {
         let width = x1 - x0 + 1;
         let height = y1 - y0 + 1;
         let pixel_count = (width as u32) * (height as u32);
 
-        debug!("Filling area {}x{} ({} pixels) with color 0x{:04X}", width, height, pixel_count, color);
+        debug!("Original coordinates: ({},{}) to ({},{}) in orientation {:?}",
+               x0, y0, x1, y1, orientation);
 
-        set_address_window(spi, cs, dc, x0, y0, x1, y1).await;
+        // Transform coordinates based on orientation to handle coordinate system changes
+        // The display is initialized with a fixed orientation, we only transform coordinates
+        // For 90° and 270°, we need to transpose coordinates to fit the rotated coordinate system
+        // For 0° and 180°, we keep the same coordinates but the content arrangement differs
+
+        let (final_x0, final_y0, final_x1, final_y1) = match orientation {
+            ScreenOrientation::Portrait => {
+                // 0°: No transformation needed
+                (x0, y0, x1, y1)
+            },
+            ScreenOrientation::Landscape => {
+                // 90°: Transpose coordinates for landscape orientation
+                // x,y -> y,x to fit the rotated coordinate system
+                (y0, x0, y1, x1)
+            },
+            ScreenOrientation::PortraitSwapped => {
+                // 180°: Keep same coordinates, content will be arranged differently
+                // The rotation effect is achieved by changing the content layout, not coordinates
+                (x0, y0, x1, y1)
+            },
+            ScreenOrientation::LandscapeSwapped => {
+                // 270°: Transpose coordinates for landscape orientation
+                // x,y -> y,x to fit the rotated coordinate system
+                (y0, x0, y1, x1)
+            },
+        };
+
+        debug!("Transformed coordinates: ({},{}) to ({},{}) for orientation {:?}",
+               final_x0, final_y0, final_x1, final_y1, orientation);
+
+        set_address_window(spi, cs, dc, final_x0, final_y0, final_x1, final_y1).await;
         start_memory_write(spi, cs, dc).await;
 
         // Prepare color bytes
@@ -439,7 +480,8 @@ async fn main(_spawner: Spawner) {
     fill_area_with_color(
         &mut spi, &mut cs_pin, &mut dc_pin,
         0, 0, MAX_WIDTH - 1, MAX_HEIGHT - 1,
-        BLACK
+        BLACK,
+        ScreenOrientation::Portrait  // Use default orientation for clearing
     ).await;
     info!("Entire controllable area cleared with black");
 
@@ -452,7 +494,7 @@ async fn main(_spawner: Spawner) {
     info!("Creating two-column test pattern (20x20 each, transposed)");
 
     // Clear screen first
-    fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, 359, 359, BLACK).await;
+    fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, 359, 359, BLACK, ScreenOrientation::Portrait).await;
     Timer::after_millis(500).await;
 
     // Column 1: Define colors: 品红、红、黄、绿、青、蓝、紫、白
@@ -478,7 +520,7 @@ async fn main(_spawner: Spawner) {
         let y_end = y_start + 19;     // Each block is 20 pixels high
 
         info!("Col 1, block {}: {} at x={}-{}, y={}-{}", i+1, name, x_start, x_end, y_start, y_end);
-        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color).await;
+        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color, ScreenOrientation::Portrait).await;
         Timer::after_millis(300).await;
     }
 
@@ -503,7 +545,7 @@ async fn main(_spawner: Spawner) {
         let y_end = y_start + 19;     // Each block is 20 pixels high
 
         info!("Col 2, block {}: Gray 0x{:04X} at x={}-{}, y={}-{}", i+1, gray_color, x_start, x_end, y_start, y_end);
-        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color).await;
+        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color, ScreenOrientation::Portrait).await;
         Timer::after_millis(300).await;
     }
 
@@ -529,36 +571,162 @@ async fn main(_spawner: Spawner) {
     info!("Total pattern size: 40x160 pixels (transposed)");
     info!("This tests color accuracy, grayscale gradient, and positioning!");
 
-    // Temporarily comment out second row to debug first row
-    /*
-    info!("Rendering second row: 8 VERTICAL grayscale bars ({}x{} each)", BAR_WIDTH, BAR_HEIGHT);
+    // Wait before demonstrating orientation changes
+    Timer::after_secs(3).await;
 
-    // Render second row: VERTICAL grayscale bars
-    for (i, (&gray_color, &gray_name)) in grayscales.iter().zip(gray_names.iter()).enumerate() {
-        let x_start = (i as u16) * BAR_WIDTH;  // Each bar starts at different X position
-        let x_end = x_start + BAR_WIDTH - 1;   // Bar width
-        let y_start = BAR_HEIGHT;              // Second row starts after first row
-        let y_end = y_start + BAR_HEIGHT - 1;  // Second row height
+    // Demonstrate different screen orientations in continuous loop
+    info!("Starting continuous orientation demonstration...");
 
-        info!("Rendering grayscale bar {}: {} (RGB565: 0x{:04X}) at position ({}, {}) to ({}, {})",
-              i + 1, gray_name, gray_color, x_start, y_start, x_end, y_end);
+    let orientations = [
+        (ScreenOrientation::Portrait, "Portrait (0°)"),
+        (ScreenOrientation::Landscape, "Landscape (90°)"),
+        (ScreenOrientation::PortraitSwapped, "Portrait Swapped (180°)"),
+        (ScreenOrientation::LandscapeSwapped, "Landscape Swapped (270°)"),
+    ];
 
-        fill_area_with_color(
-            &mut spi, &mut cs_pin, &mut dc_pin,
-            x_start, y_start, x_end, y_end,
-            gray_color
-        ).await;
+    info!("All rendering tests completed successfully!");
+    info!("Starting continuous orientation loop with 10-second intervals...");
 
-        info!("Grayscale bar {} ({}) completed", i + 1, gray_name);
-    }
-    */
-
-    info!("All 8 color bars rendered successfully!");
-    info!("Display test completed - showing static color pattern");
-
-    // Keep the display showing the color bars
+    // Continuous loop to demonstrate orientations
+    let mut cycle_count = 0;
     loop {
-        Timer::after_secs(10).await;
-        info!("Color bars still displaying...");
+        cycle_count += 1;
+        info!("=== Starting orientation cycle {} ===", cycle_count);
+
+        for (orientation, name) in orientations.iter() {
+            info!("Testing orientation: {}", name);
+
+            // Clear screen with black
+            fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, 359, 359, BLACK, *orientation).await;
+            Timer::after_millis(500).await;
+
+            // Render test pattern based on orientation
+            match orientation {
+                ScreenOrientation::Portrait => {
+                    // Portrait (0°): normal vertical layout (2 columns, 8 rows each)
+                    info!("Drawing first column: 8 colors in orientation {}", name);
+                    for (i, (&color, &color_name)) in colors.iter().zip(color_names.iter()).enumerate() {
+                        let x_start = 0;              // First column starts at x=0
+                        let x_end = 19;               // First column is 20 pixels wide
+                        let y_start = i as u16 * 20;  // Each block starts at i*20
+                        let y_end = y_start + 19;     // Each block is 20 pixels high
+
+                        info!("Col 1, block {}: {} at x={}-{}, y={}-{} ({})", i+1, color_name, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+
+                    info!("Drawing second column: 8 grayscale levels in orientation {}", name);
+                    for (i, &gray_color) in grayscale.iter().enumerate() {
+                        let x_start = 20;             // Second column starts at x=20
+                        let x_end = 39;               // Second column ends at x=39
+                        let y_start = i as u16 * 20;  // Each block starts at i*20
+                        let y_end = y_start + 19;     // Each block is 20 pixels high
+
+                        info!("Col 2, block {}: Gray 0x{:04X} at x={}-{}, y={}-{} ({})", i+1, gray_color, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+                },
+                ScreenOrientation::PortraitSwapped => {
+                    // Portrait Swapped (180°): true 180° rotation - both columns and rows are flipped
+                    // First column becomes second column at bottom, second column becomes first column at bottom
+                    info!("Drawing first column (180° rotated): 8 colors in orientation {}", name);
+                    for (i, (&color, &color_name)) in colors.iter().zip(color_names.iter()).enumerate() {
+                        // 180° rotation: first column (x=0-19) becomes second column (x=20-39)
+                        // and rows are flipped: row 0 becomes row 7, row 1 becomes row 6, etc.
+                        let x_start = 20;                        // Rotated to second column
+                        let x_end = 39;                          // Second column is 20 pixels wide
+                        let y_start = (7 - i) as u16 * 20;       // Flip the row order
+                        let y_end = y_start + 19;                // Each block is 20 pixels high
+
+                        info!("Col 1 (180°), block {}: {} at x={}-{}, y={}-{} ({})", i+1, color_name, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+
+                    info!("Drawing second column (180° rotated): 8 grayscale levels in orientation {}", name);
+                    for (i, &gray_color) in grayscale.iter().enumerate() {
+                        // 180° rotation: second column (x=20-39) becomes first column (x=0-19)
+                        // and rows are flipped: row 0 becomes row 7, row 1 becomes row 6, etc.
+                        let x_start = 0;                         // Rotated to first column
+                        let x_end = 19;                          // First column is 20 pixels wide
+                        let y_start = (7 - i) as u16 * 20;       // Flip the row order
+                        let y_end = y_start + 19;                // Each block is 20 pixels high
+
+                        info!("Col 2 (180°), block {}: Gray 0x{:04X} at x={}-{}, y={}-{} ({})", i+1, gray_color, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+                },
+                ScreenOrientation::Landscape => {
+                    // Landscape (90°): horizontal layout (2 rows, 8 columns each)
+                    info!("Drawing first row: 8 colors in orientation {}", name);
+                    for (i, (&color, &color_name)) in colors.iter().zip(color_names.iter()).enumerate() {
+                        let x_start = i as u16 * 20;  // Each block starts at i*20
+                        let x_end = x_start + 19;     // Each block is 20 pixels wide
+                        let y_start = 0;              // First row starts at y=0
+                        let y_end = 19;               // First row is 20 pixels high
+
+                        info!("Row 1, block {}: {} at x={}-{}, y={}-{} ({})", i+1, color_name, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+
+                    info!("Drawing second row: 8 grayscale levels in orientation {}", name);
+                    for (i, &gray_color) in grayscale.iter().enumerate() {
+                        let x_start = i as u16 * 20;  // Each block starts at i*20
+                        let x_end = x_start + 19;     // Each block is 20 pixels wide
+                        let y_start = 20;             // Second row starts at y=20
+                        let y_end = 39;               // Second row is 20 pixels high
+
+                        info!("Row 2, block {}: Gray 0x{:04X} at x={}-{}, y={}-{} ({})", i+1, gray_color, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+                },
+                ScreenOrientation::LandscapeSwapped => {
+                    // Landscape Swapped (270°): horizontal layout but rotated 180° from 90°
+                    // First row becomes second row from right to left, second row becomes first row from right to left
+                    info!("Drawing first row (270° rotated): 8 colors in orientation {}", name);
+                    for (i, (&color, &color_name)) in colors.iter().zip(color_names.iter()).enumerate() {
+                        // 270° rotation: first row becomes second row, and columns are flipped
+                        // Column 0 becomes column 7, column 1 becomes column 6, etc.
+                        let x_start = (7 - i) as u16 * 20;  // Flip the column order
+                        let x_end = x_start + 19;           // Each block is 20 pixels wide
+                        let y_start = 20;                   // Rotated to second row
+                        let y_end = 39;                     // Second row is 20 pixels high
+
+                        info!("Row 1 (270°), block {}: {} at x={}-{}, y={}-{} ({})", i+1, color_name, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+
+                    info!("Drawing second row (270° rotated): 8 grayscale levels in orientation {}", name);
+                    for (i, &gray_color) in grayscale.iter().enumerate() {
+                        // 270° rotation: second row becomes first row, and columns are flipped
+                        // Column 0 becomes column 7, column 1 becomes column 6, etc.
+                        let x_start = (7 - i) as u16 * 20;  // Flip the column order
+                        let x_end = x_start + 19;           // Each block is 20 pixels wide
+                        let y_start = 0;                    // Rotated to first row
+                        let y_end = 19;                     // First row is 20 pixels high
+
+                        info!("Row 2 (270°), block {}: Gray 0x{:04X} at x={}-{}, y={}-{} ({})", i+1, gray_color, x_start, x_end, y_start, y_end, name);
+                        fill_area_with_color(&mut spi, &mut cs_pin, &mut dc_pin, x_start, y_start, x_end, y_end, gray_color, *orientation).await;
+                        Timer::after_millis(100).await;
+                    }
+                }
+            }
+
+            info!("Orientation {} completed - Two-column pattern rendered", name);
+
+            // Wait 10 seconds before next orientation
+            info!("Waiting 10 seconds before next orientation...");
+            Timer::after_secs(10).await;
+        }
+
+        info!("=== Completed orientation cycle {} ===", cycle_count);
+        info!("Starting next cycle in 2 seconds...");
+        Timer::after_secs(2).await;
     }
 }
