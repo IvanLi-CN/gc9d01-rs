@@ -387,11 +387,11 @@ where
         )
         .await?; // 0xF3
 
-        self.write_command(
-            Instruction::MemoryAccessControl,
-            &[self.config.orientation as u8],
-        ) // Set based on config (0x60 for Landscape)
-        .await?; // 0x36
+        // Memory access control - use fixed value as in working example
+        // This ensures consistent behavior regardless of orientation
+        // Orientation will be handled by coordinate transformation
+        self.write_command(Instruction::MemoryAccessControl, &[0x40]) // Fixed value as in reference document
+            .await?; // 0x36
 
         self.write_command(
             Instruction::DisplayFunctionControl,
@@ -402,6 +402,10 @@ where
         self.write_command(Instruction::SleepOut, &[]).await?; // 0x11
         TIMER::after_millis(200).await;
         self.write_command(Instruction::DisplayOn, &[]).await?; // 0x29
+
+        // Memory write command - ready for pixel data (as in working example)
+        self.write_command(Instruction::MemoryWrite, &[]).await?; // 0x2C
+        TIMER::after_millis(100).await;
 
         Ok(()) // init function ends here
     }
@@ -448,6 +452,30 @@ where
         self.dc.set_high()
     }
 
+    /// Transform logical coordinates to physical coordinates based on orientation
+    fn transform_coordinates(&self, x: u16, y: u16) -> (u16, u16) {
+        match self.config.orientation {
+            Orientation::Portrait => {
+                // Portrait mode needs 180° rotation to display correctly
+                // This compensates for the hardware orientation
+                (self.config.width - 1 - x, self.config.height - 1 - y)
+            }
+            Orientation::Landscape => {
+                // 90° rotation: logical(x,y) -> physical(y, width-1-x)
+                // For GC9D01: physical coordinates need adjustment for 40x160 display
+                (39 - y, 159 - x)
+            }
+            Orientation::PortraitSwapped => {
+                // This becomes the "normal" portrait (no rotation needed)
+                (x, y)
+            }
+            Orientation::LandscapeSwapped => {
+                // 270° rotation
+                (y, self.config.width - 1 - x)
+            }
+        }
+    }
+
     pub async fn set_address_window(
         &mut self,
         sx: u16,
@@ -455,28 +483,58 @@ where
         ex: u16,
         ey: u16,
     ) -> Result<(), Error<BusE, PinE>> {
-        let final_sx = sx + self.config.dx;
-        let final_ex = ex + self.config.dx;
-        let final_sy = sy + self.config.dy;
-        let final_ey = ey + self.config.dy;
+        // Apply coordinate transformation based on orientation
+        let (phys_sx, phys_sy) = self.transform_coordinates(sx, sy);
+        let (phys_ex, phys_ey) = self.transform_coordinates(ex, ey);
+
+        // Apply offset adjustments
+        let final_sx = phys_sx + self.config.dx;
+        let final_ex = phys_ex + self.config.dx;
+        let final_sy = phys_sy + self.config.dy;
+        let final_ey = phys_ey + self.config.dy;
+
+        // Ensure coordinates are in correct order
+        let (min_x, max_x) = if final_sx <= final_ex {
+            (final_sx, final_ex)
+        } else {
+            (final_ex, final_sx)
+        };
+        let (min_y, max_y) = if final_sy <= final_ey {
+            (final_sy, final_ey)
+        } else {
+            (final_ey, final_sy)
+        };
+
+        #[cfg(feature = "defmt")]
+        defmt::debug!(
+            "Address window: logical ({},{}) to ({},{}) -> physical ({},{}) to ({},{})",
+            sx,
+            sy,
+            ex,
+            ey,
+            min_x,
+            min_y,
+            max_x,
+            max_y
+        );
 
         self.write_command(
             Instruction::RowAddressSet,
             &[
-                (final_sx >> 8) as u8,
-                final_sx as u8,
-                (final_ex >> 8) as u8,
-                final_ex as u8,
+                (min_x >> 8) as u8,
+                min_x as u8,
+                (max_x >> 8) as u8,
+                max_x as u8,
             ],
         )
         .await?;
         self.write_command(
             Instruction::ColumnAddressSet,
             &[
-                (final_sy >> 8) as u8,
-                final_sy as u8,
-                (final_ey >> 8) as u8,
-                final_ey as u8,
+                (min_y >> 8) as u8,
+                min_y as u8,
+                (max_y >> 8) as u8,
+                max_y as u8,
             ],
         )
         .await

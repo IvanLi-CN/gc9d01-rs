@@ -11,7 +11,6 @@ use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
 };
 use gc9d01::{Config as DisplayDriverConfig, GC9D01, Orientation, Timer as Gc9d01Timer};
 use static_cell::StaticCell;
@@ -128,9 +127,13 @@ async fn main(_spawner: Spawner) {
     }
 
     loop {
-        display.fill_color(Rgb565::CSS_GRAY).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
-        info!("Drawing test pattern.");
+        // Clear screen first
+        display.fill_color(Rgb565::CSS_BLACK).await.unwrap();
+        embassy_time::Timer::after_millis(500).await;
+
+        info!("Drawing two-row test pattern: colors on top, grayscale on bottom.");
+
+        // Define colors for the first row
         let colors = [
             Rgb565::CSS_WHITE,
             Rgb565::CSS_YELLOW,
@@ -142,35 +145,62 @@ async fn main(_spawner: Spawner) {
             Rgb565::CSS_BLACK,
         ];
 
-        // Each stripe is 5 pixels wide and 160 pixels high
+        // Define grayscale colors for the second row
+        let grayscales = [
+            Rgb565::new(31, 63, 31),  // White (max brightness)
+            Rgb565::new(27, 54, 27),  // Light gray
+            Rgb565::new(23, 46, 23),  // Medium-light gray
+            Rgb565::new(19, 38, 19),  // Medium gray
+            Rgb565::new(15, 30, 15),  // Medium-dark gray
+            Rgb565::new(11, 22, 11),  // Dark gray
+            Rgb565::new(7, 14, 7),    // Very dark gray
+            Rgb565::new(0, 0, 0),     // Black
+        ];
+
+        // Each stripe is 20 pixels wide, each row is 20 pixels high
         const STRIPE_WIDTH: u16 = 20;
-        const STRIPE_HEIGHT: u16 = 40;
-        const TOTAL_STRIPES: usize = 8;
+        const ROW_HEIGHT: u16 = 20;
 
         // Create a buffer for one stripe's pixel data
-        let mut stripe_pixels = [Rgb565::CSS_BLACK; (STRIPE_WIDTH * STRIPE_HEIGHT) as usize];
+        let mut stripe_pixels = [Rgb565::CSS_BLACK; (STRIPE_WIDTH * ROW_HEIGHT) as usize];
 
+        // Draw first row - color stripes
+        info!("Drawing color row (top)");
         for (i, color) in colors.iter().enumerate() {
             let x = i as u16 * STRIPE_WIDTH;
+            let y = 0; // First row
 
             // Fill the stripe buffer with the current color
             for pixel in stripe_pixels.iter_mut() {
                 *pixel = *color;
             }
 
-            // Set the address window for the current stripe
-            display
-                .set_address_window(x, 0, x + STRIPE_WIDTH - 1, STRIPE_HEIGHT - 1)
-                .await
-                .unwrap();
-
             // Write the pixel data for the current stripe
             display
-                .write_area(x, 0, STRIPE_WIDTH, STRIPE_HEIGHT, &stripe_pixels)
+                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels)
                 .await
                 .unwrap();
         }
 
-        embassy_time::Timer::after_secs(1).await;
+        // Draw second row - grayscale stripes
+        info!("Drawing grayscale row (bottom)");
+        for (i, gray_color) in grayscales.iter().enumerate() {
+            let x = i as u16 * STRIPE_WIDTH;
+            let y = ROW_HEIGHT; // Second row
+
+            // Fill the stripe buffer with the current grayscale color
+            for pixel in stripe_pixels.iter_mut() {
+                *pixel = *gray_color;
+            }
+
+            // Write the pixel data for the current stripe
+            display
+                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels)
+                .await
+                .unwrap();
+        }
+
+        info!("Two-row pattern completed. Colors: top row, Grayscale: bottom row");
+        embassy_time::Timer::after_secs(3).await;
     }
 }
