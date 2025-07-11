@@ -11,6 +11,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
     pixelcolor::Rgb565,
+    prelude::RgbColor,
 };
 use micromath::F32Ext;
 use gc9d01::{Config as DisplayDriverConfig, GC9D01, Orientation, Timer as Gc9d01Timer};
@@ -19,6 +20,13 @@ use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use defmt::*;
+
+// Screen dimensions - logical vs physical
+const LOGICAL_WIDTH: usize = 160;   // Logical width after rotation
+const LOGICAL_HEIGHT: usize = 40;   // Logical height after rotation
+const PHYSICAL_WIDTH: usize = 40;   // Physical screen width
+const PHYSICAL_HEIGHT: usize = 160; // Physical screen height
+const SCREEN_PIXELS: usize = PHYSICAL_WIDTH * PHYSICAL_HEIGHT; // Frame buffer organized by physical layout
 
 // Timer implementation for the GC9D01 driver
 struct EmbassyDisplayTimer;
@@ -100,6 +108,10 @@ async fn main(_spawner: Spawner) {
     static DISPLAY_BUFFER_CELL: StaticCell<[u8; gc9d01::BUF_SIZE]> = StaticCell::new();
     let buffer_slice: &mut [u8] = DISPLAY_BUFFER_CELL.init([0; gc9d01::BUF_SIZE]);
 
+    // Create frame buffer for the new architecture
+    static FRAME_BUFFER_CELL: StaticCell<[Rgb565; SCREEN_PIXELS]> = StaticCell::new();
+    let frame_buffer: &mut [Rgb565] = FRAME_BUFFER_CELL.init([Rgb565::BLACK; SCREEN_PIXELS]);
+
     let mut display: GC9D01<
         '_,
         EmbassySpiDevice<
@@ -111,7 +123,7 @@ async fn main(_spawner: Spawner) {
         Output<'_>,
         Output<'_>,
         EmbassyDisplayTimer,
-    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, buffer_slice);
+    > = GC9D01::new_with_frame_buffer(display_config, spi_device, dc_pin, rst_pin, buffer_slice, frame_buffer);
 
     info!("Initializing display...");
     match display.init().await {
@@ -137,6 +149,38 @@ async fn main(_spawner: Spawner) {
 
     let colors = [RED, GREEN, BLUE, YELLOW, MAGENTA, CYAN, WHITE, BLACK, ORANGE, PURPLE];
 
+    // Convert HSV to RGB565
+    fn hsv_to_rgb565(h: f32, s: f32, v: f32) -> Rgb565 {
+        let c = v * s;
+        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+        let m = v - c;
+
+        let (r_prime, g_prime, b_prime) = if h < 60.0 {
+            (c, x, 0.0)
+        } else if h < 120.0 {
+            (x, c, 0.0)
+        } else if h < 180.0 {
+            (0.0, c, x)
+        } else if h < 240.0 {
+            (0.0, x, c)
+        } else if h < 300.0 {
+            (x, 0.0, c)
+        } else {
+            (c, 0.0, x)
+        };
+
+        let r = ((r_prime + m) * 255.0) as u8;
+        let g = ((g_prime + m) * 255.0) as u8;
+        let b = ((b_prime + m) * 255.0) as u8;
+
+        // Convert to RGB565
+        let r5 = r >> 3;
+        let g6 = g >> 2;
+        let b5 = b >> 3;
+
+        Rgb565::new(r5, g6, b5)
+    }
+
     loop {
         // Test 0: Basic fill test to verify display is working
         info!("Test 0: Basic Fill Test");
@@ -144,24 +188,26 @@ async fn main(_spawner: Spawner) {
         // Fill with red
         info!("Filling screen with RED...");
         display.fill_color(RED).await.unwrap();
+        display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
         // Fill with green
         info!("Filling screen with GREEN...");
         display.fill_color(GREEN).await.unwrap();
+        display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
         // Fill with blue
         info!("Filling screen with BLUE...");
         display.fill_color(BLUE).await.unwrap();
+        display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
         // Pattern 1: Complex Checkerboard with Multiple Colors
         info!("Pattern 1: Complex Multi-Color Checkerboard (90°)");
 
-        // Clear screen first
-        display.fill_color(BLACK).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
 
         // Create a complex checkerboard pattern for 160×40 logical screen
         // 8×2 blocks (20×20 pixels each) - similar to stm32g4 example
@@ -178,21 +224,53 @@ async fn main(_spawner: Spawner) {
                 let x = col * block_width;
                 let y = row * block_height;
 
-                // Create pixel data for this block
-                let block_pixels = [color; (20 * 20) as usize];
-
-                display.write_area(x, y, block_width, block_height, &block_pixels).await.unwrap();
+                // Fill the block area in frame buffer
+                display.fill_rect(x, y, block_width, block_height, color);
             }
         }
 
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
         info!("Complex checkerboard pattern completed");
-        embassy_time::Timer::after_secs(10).await;
+        embassy_time::Timer::after_secs(5).await;
 
-        // Pattern 2: Gradient Stripes
-        info!("Pattern 2: Gradient Color Stripes (90°)");
+        // Pattern 2: 10x10 Color Checkerboard
+        info!("Pattern 2: 10x10 Color Checkerboard (90°)");
 
-        display.fill_color(BLACK).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
+
+        // Create a 10x10 color checkerboard for 160×40 logical screen
+        let block_width = 10;
+        let block_height = 10;
+        let blocks_x = 16;     // 160 / 10 = 16 blocks across
+        let blocks_y = 4;      // 40 / 10 = 4 blocks down
+
+        for row in 0..blocks_y {
+            for col in 0..blocks_x {
+                let color_index = ((row + col) as usize) % colors.len();
+                let color = colors[color_index];
+
+                let x = col * block_width;
+                let y = row * block_height;
+
+                // Fill the block area in frame buffer
+                display.fill_rect(x, y, block_width, block_height, color);
+            }
+        }
+
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
+        info!("Pattern 2 completed");
+        embassy_time::Timer::after_secs(5).await;
+
+        // Pattern 3: Gradient Stripes
+        info!("Pattern 3: Gradient Color Stripes (90°)");
+
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
 
         // Create vertical stripes with gradient effect for 160×40 logical screen
         let stripe_width = 16; // 160 / 10 = 16 pixels per stripe
@@ -210,19 +288,22 @@ async fn main(_spawner: Spawner) {
                     _ => Rgb565::new(0, 0, intensity), // Blue gradient
                 };
 
-                let line_pixels = [gradient_color; 16];
-                display.write_area(x, y, stripe_width, 1, &line_pixels).await.unwrap();
+                // Fill one horizontal line of the stripe in frame buffer
+                display.fill_rect(x, y, stripe_width, 1, gradient_color);
             }
         }
 
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
         info!("Gradient stripes pattern completed");
-        embassy_time::Timer::after_secs(10).await;
+        embassy_time::Timer::after_secs(5).await;
 
-        // Pattern 3: Concentric Rectangles
-        info!("Pattern 3: Concentric Rectangles (90°)");
+        // Pattern 4: Concentric Rectangles
+        info!("Pattern 4: Concentric Rectangles (90°)");
 
-        display.fill_color(BLACK).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
 
         // Draw concentric rectangles from outside to inside
         for layer in 0..5 {
@@ -235,10 +316,7 @@ async fn main(_spawner: Spawner) {
                     let end_x = 159 - layer * 16;
                     if start_x <= end_x && end_x < 160 {
                         let width = end_x - start_x + 1;
-                        // Create line pixels array - use a reasonable max width
-                        let line_pixels = [color; 160]; // Max possible width for 160×40 logical screen
-                        let line_slice = &line_pixels[..width as usize];
-                        display.write_area(start_x as u16, border_y as u16, width as u16, 1, line_slice).await.unwrap();
+                        display.fill_rect(start_x as u16, border_y as u16, width as u16, 1, color);
                     }
                 }
             }
@@ -249,23 +327,24 @@ async fn main(_spawner: Spawner) {
                     let start_y = layer * 4;
                     let end_y = 39 - layer * 4;
                     if start_y <= end_y && end_y < 40 {
-                        for y in start_y..=end_y {
-                            let pixel = [color; 1];
-                            display.write_area(border_x as u16, y as u16, 1, 1, &pixel).await.unwrap();
-                        }
+                        let height = end_y - start_y + 1;
+                        display.fill_rect(border_x as u16, start_y as u16, 1, height as u16, color);
                     }
                 }
             }
         }
 
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
         info!("Concentric rectangles pattern completed");
-        embassy_time::Timer::after_secs(10).await;
+        embassy_time::Timer::after_secs(5).await;
 
-        // Pattern 4: Diagonal Lines Pattern
-        info!("Pattern 4: Diagonal Lines Pattern (90°)");
+        // Pattern 5: Diagonal Lines Pattern
+        info!("Pattern 5: Diagonal Lines Pattern (90°)");
 
-        display.fill_color(BLACK).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
 
         // Draw diagonal lines across the screen for 160×40 logical screen
         for line in 0..20 {
@@ -278,40 +357,43 @@ async fn main(_spawner: Spawner) {
                 let y = (step * 40 / 160) % 40;        // screen height
 
                 if x < 160 && y < 40 {
-                    let pixel = [color; 1];
-                    display.write_area(x as u16, y as u16, 1, 1, &pixel).await.unwrap();
+                    display.set_pixel(x as u16, y as u16, color);
                 }
             }
         }
 
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
         info!("Diagonal lines pattern completed");
-        embassy_time::Timer::after_secs(10).await;
+        embassy_time::Timer::after_secs(5).await;
 
-        // Pattern 5: Spiral Pattern
-        info!("Pattern 5: Spiral Pattern (90°)");
+        // Pattern 6: Rainbow Gradient with Saturation
+        info!("Pattern 6: Rainbow Gradient with Saturation (90°)");
 
-        display.fill_color(BLACK).await.unwrap();
-        embassy_time::Timer::after_secs(1).await;
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
 
-        // Draw a spiral pattern for 160×40 logical screen
-        let center_x = 80;  // center X (160/2)
-        let center_y = 20;  // center Y (40/2)
-        let max_radius = 20;
+        // Create rainbow gradient: long edge (160px) = hue, short edge (40px) = saturation
+        for y in 0..LOGICAL_HEIGHT {
+            for x in 0..LOGICAL_WIDTH {
+                // Hue varies along the long edge (160 pixels)
+                let hue = (x as f32 / LOGICAL_WIDTH as f32) * 360.0;
 
-        for angle in 0..720 { // Two full rotations
-            let radius = (angle as f32 / 720.0 * max_radius as f32) as u16;
-            let rad = angle as f32 * 3.14159 / 180.0;
-            let x = center_x as i32 + (radius as f32 * rad.cos()) as i32;
-            let y = center_y as i32 + (radius as f32 * rad.sin()) as i32;
+                // Saturation varies along the short edge (40 pixels): 0% to 100%
+                let saturation = y as f32 / (LOGICAL_HEIGHT - 1) as f32;
 
-            if x >= 0 && x < 160 && y >= 0 && y < 40 {
-                let color = colors[(angle / 72) % colors.len()];
-                let pixel = [color; 1];
-                display.write_area(x as u16, y as u16, 1, 1, &pixel).await.unwrap();
+                // Convert HSV to RGB565
+                let rgb = hsv_to_rgb565(hue, saturation, 1.0); // Full brightness
+
+                display.set_pixel(x as u16, y as u16, rgb);
             }
         }
 
-        info!("Spiral pattern completed");
-        embassy_time::Timer::after_secs(10).await;
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
+        info!("Rainbow gradient pattern completed");
+        embassy_time::Timer::after_secs(5).await;
     }
 }
