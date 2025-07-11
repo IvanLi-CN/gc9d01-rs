@@ -213,7 +213,7 @@ async fn initialize_gc9d01(
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    info!("Starting GC9D01 90° Simple Checkerboard Test Firmware");
+    info!("Starting GC9D01 90° Complex Patterns Test Firmware");
 
     let mut config = embassy_stm32::Config::default();
     {
@@ -398,12 +398,23 @@ async fn main(_spawner: Spawner) {
     // Initialize GC9D01 using the extracted function
     initialize_gc9d01(&mut spi, &mut cs_pin, &mut dc_pin, &mut rst_pin).await;
 
-    info!("Starting 90° Simple Checkerboard Test");
-    info!("This test demonstrates a simple checkerboard pattern in 90° orientation");
-    info!("Each block should be clearly separated with no overlaps");
+    info!("Starting 90° Complex Patterns Test");
+    info!("This test demonstrates complex patterns in 90° orientation using direct SPI");
+    info!("Configuration: 160×40 logical screen with coordinate transformation");
 
     // RGB565 color definitions
+    const RED: u16 = 0xF800;
+    const GREEN: u16 = 0x07E0;
+    const BLUE: u16 = 0x001F;
+    const YELLOW: u16 = 0xFFE0;
+    const MAGENTA: u16 = 0xF81F;
+    const CYAN: u16 = 0x07FF;
+    const WHITE: u16 = 0xFFFF;
     const BLACK: u16 = 0x0000;
+    const ORANGE: u16 = 0xFD20;
+    const PURPLE: u16 = 0x8010;
+
+    let colors = [RED, GREEN, BLUE, YELLOW, MAGENTA, CYAN, WHITE, BLACK, ORANGE, PURPLE];
 
     // Clear entire physical screen area first
     // Physical GC9D01 screen is 40x160 pixels, rotated 270° to appear as 160x40
@@ -418,64 +429,181 @@ async fn main(_spawner: Spawner) {
 
     Timer::after_secs(2).await;
 
-    // Simple checkerboard test with correct 90° coordinate transformation
-    info!("Starting simple checkerboard test (90° orientation with coordinate transformation)");
-
     loop {
+        // Test 0: Basic fill test to verify display is working
+        info!("Test 0: Basic Fill Test");
+
+        // Fill with red
+        info!("Filling screen with RED...");
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, RED).await;
+        Timer::after_secs(2).await;
+
+        // Fill with green
+        info!("Filling screen with GREEN...");
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, GREEN).await;
+        Timer::after_secs(2).await;
+
+        // Fill with blue
+        info!("Filling screen with BLUE...");
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLUE).await;
+        Timer::after_secs(2).await;
+
+        // Pattern 1: Complex Checkerboard with Multiple Colors
+        info!("Pattern 1: Complex Multi-Color Checkerboard (90°)");
+
         // Clear screen first
-        info!("Clearing logical screen with black...");
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, 0x0000).await;
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
         Timer::after_secs(1).await;
 
-        // Draw simple checkerboard with no overlaps for 160x40 logical screen
-        info!("Drawing 16x4 checkerboard with 10x10 pixel blocks (90° orientation with coordinate transformation)");
-
-        // RGB565 colors
-        const RED: u16 = 0xF800;
-        const GREEN: u16 = 0x07E0;
-        const BLUE: u16 = 0x001F;
-        const YELLOW: u16 = 0xFFE0;
-        const MAGENTA: u16 = 0xF81F;
-        const CYAN: u16 = 0x07FF;
-        const WHITE: u16 = 0xFFFF;
-        const BLACK: u16 = 0x0000;
-
-        let colors = [RED, GREEN, BLUE, YELLOW, MAGENTA, CYAN, WHITE, BLACK];
-
-        // Use 10x10 pixel blocks for 160x40 logical screen
-        let block_size: u16 = 10; // 10x10 pixel blocks
-        let blocks_x: u16 = 16;   // 16 blocks horizontally (160 pixels)
-        let blocks_y: u16 = 4;    // 4 blocks vertically (40 pixels)
-        let start_x: u16 = 0;     // Start from edge
-        let start_y: u16 = 0;     // Start from edge
-
-        info!("Drawing {}x{} checkerboard with {} pixel blocks", blocks_x, blocks_y, block_size);
+        // Create a complex checkerboard pattern for 160×40 logical screen
+        // 8×2 blocks (20×20 pixels each) - similar to stm32g4 example
+        let block_width = 20;  // 160 / 8 = 20 pixels wide
+        let block_height = 20; // 40 / 2 = 20 pixels high
+        let blocks_x = 8;      // 8 blocks across (160 pixels width)
+        let blocks_y = 2;      // 2 blocks down (40 pixels height)
 
         for row in 0..blocks_y {
             for col in 0..blocks_x {
-                // Simple alternating pattern
-                let color_index = ((row + col) as usize) % colors.len();
+                let color_index = ((row * blocks_x + col) as usize) % colors.len();
                 let color = colors[color_index];
 
-                // Calculate exact logical pixel coordinates with no overlap
-                let x_start = start_x + col * block_size;
-                let x_end = x_start + block_size - 1;
-                let y_start = start_y + row * block_size;
-                let y_end = y_start + block_size - 1;
+                let x = col * block_width;
+                let y = row * block_height;
 
-                info!("Block ({},{}) -> logical pixels ({},{}) to ({},{}) color 0x{:04X}",
-                      row, col, x_start, y_start, x_end, y_end, color);
+                // Fill the block area
+                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                       x, y, x + block_width - 1, y + block_height - 1, color).await;
+            }
+        }
 
-                // Ensure we don't go out of logical bounds (160x40 screen)
-                if x_end < LOGICAL_WIDTH && y_end < LOGICAL_HEIGHT {
-                    fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                           x_start, y_start, x_end, y_end, color).await;
-                    Timer::after_millis(100).await; // Shorter delay for smaller blocks
+        info!("Complex checkerboard pattern completed");
+        Timer::after_secs(10).await;
+
+        // Pattern 2: Gradient Stripes
+        info!("Pattern 2: Gradient Color Stripes (90°)");
+
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
+        Timer::after_secs(1).await;
+
+        // Create vertical stripes with gradient effect for 160×40 logical screen
+        let stripe_width = 16; // 160 / 10 = 16 pixels per stripe
+        let stripes = 10;
+
+        for stripe in 0..stripes {
+            let x = stripe * stripe_width;
+
+            // Create gradient within each stripe (height: 40)
+            for y in 0..40 {
+                let intensity = (y as f32 / 39.0 * 31.0) as u16;
+                let gradient_color = match stripe % 3 {
+                    0 => intensity << 11, // Red gradient (bits 15-11)
+                    1 => intensity << 6,  // Green gradient (bits 10-5, but intensity*2 for 6-bit)
+                    _ => intensity,       // Blue gradient (bits 4-0)
+                };
+
+                // Fill one horizontal line of the stripe
+                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                       x, y, x + stripe_width - 1, y, gradient_color).await;
+            }
+        }
+
+        info!("Gradient stripes pattern completed");
+        Timer::after_secs(10).await;
+
+        // Pattern 3: Concentric Rectangles
+        info!("Pattern 3: Concentric Rectangles (90°)");
+
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
+        Timer::after_secs(1).await;
+
+        // Draw concentric rectangles from outside to inside
+        for layer in 0..5 {
+            let color = colors[layer % colors.len()];
+
+            // Top and bottom borders for 160×40 logical screen
+            for border_y in [layer * 4, 39 - layer * 4] {
+                if border_y < 40 {
+                    let start_x = layer * 16;
+                    let end_x = 159 - layer * 16;
+                    if start_x <= end_x && end_x < 160 {
+                        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                               start_x as u16, border_y as u16, end_x as u16, border_y as u16, color).await;
+                    }
+                }
+            }
+
+            // Left and right borders for 160×40 logical screen
+            for border_x in [layer * 16, 159 - layer * 16] {
+                if border_x < 160 {
+                    let start_y = layer * 4;
+                    let end_y = 39 - layer * 4;
+                    if start_y <= end_y && end_y < 40 {
+                        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                               border_x as u16, start_y as u16, border_x as u16, end_y as u16, color).await;
+                    }
                 }
             }
         }
 
-        info!("Simple checkerboard completed (90° orientation with coordinate transformation) - 16x4 blocks on 160x40 logical screen");
-        Timer::after_secs(3).await;
+        info!("Concentric rectangles pattern completed");
+        Timer::after_secs(10).await;
+
+        // Pattern 4: Diagonal Lines Pattern
+        info!("Pattern 4: Diagonal Lines Pattern (90°)");
+
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
+        Timer::after_secs(1).await;
+
+        // Draw diagonal lines across the screen for 160×40 logical screen
+        for line in 0..20 {
+            let color = colors[line % colors.len()];
+            let spacing = 8;
+
+            // Draw diagonal line from top-left to bottom-right (160×40)
+            for step in 0..200 {
+                let x = (step + line * spacing) % 160; // screen width
+                let y = (step * 40 / 160) % 40;        // screen height
+
+                if x < 160 && y < 40 {
+                    fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                           x as u16, y as u16, x as u16, y as u16, color).await;
+                }
+            }
+        }
+
+        info!("Diagonal lines pattern completed");
+        Timer::after_secs(10).await;
+
+        // Pattern 5: Spiral Pattern
+        info!("Pattern 5: Spiral Pattern (90°)");
+
+        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
+        Timer::after_secs(1).await;
+
+        // Draw a simplified spiral pattern for 160×40 logical screen
+        let center_x = 80;  // center X (160/2)
+        let center_y = 20;  // center Y (40/2)
+
+        // Create a simple expanding square spiral
+        for step in 0..400 {
+            let radius = step / 20; // Expand every 20 steps
+            let angle_step = step % 20;
+
+            let (x, y) = match angle_step / 5 {
+                0 => (center_x + radius, center_y + (angle_step % 5) - 2), // Right side
+                1 => (center_x + radius - (angle_step % 5), center_y + 2), // Top side
+                2 => (center_x - radius, center_y + 2 - (angle_step % 5)), // Left side
+                _ => (center_x - radius + (angle_step % 5), center_y - 2), // Bottom side
+            };
+
+            if x >= 0 && x < 160 && y >= 0 && y < 40 {
+                let color = colors[(step / 40) % colors.len()];
+                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
+                                       x as u16, y as u16, x as u16, y as u16, color).await;
+            }
+        }
+
+        info!("Spiral pattern completed");
+        Timer::after_secs(10).await;
     }
 }
