@@ -1,5 +1,5 @@
 pre-commit:
-  parallel: true
+  parallel: false  # Changed to false to ensure proper order of execution
   commands:
     fmt:
       glob: "*.{rs}"
@@ -7,4 +7,9 @@ pre-commit:
       stage_fixed: true
     clippy:
       glob: "*.{rs}"
-      run: cargo clippy
+      run: cargo clippy --all-targets --all-features
+    build-verification:
+      run: ./scripts/build-all.sh
+      skip:
+        - merge
+        - rebase

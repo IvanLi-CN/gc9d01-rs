@@ -1,4 +1,4 @@
-name: Build
+name: Build and Test
 
 on:
   push:
@@ -10,15 +10,111 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  # Main library build and test
+  library:
+    name: Library Build and Test
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        features:
+          - ""
+          - "async"
+          - "defmt"
+          - "async,defmt"
+
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
+
+    - name: Build library
+      run: cargo build --verbose --features "${{ matrix.features }}"
+
     - name: Run tests
-      run: cargo test --verbose
-    - name: Build
-      run: cargo build --verbose --features async
+      run: cargo test --verbose --features "${{ matrix.features }}"
+
+  # Example projects build verification
+  examples:
+    name: Example Projects Build
+    runs-on: ubuntu-latest
+    needs: library
+
+    strategy:
+      matrix:
+        example:
+          - "stm32g4"
+          - "stm32g4-90-complex-patterns"
+          - "stm32g4-direct-spi"
+          - "stm32g4-direct-spi-90-complex-patterns"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: thumbv7em-none-eabihf
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          examples/${{ matrix.example }}/target
+        key: ${{ runner.os }}-example-${{ matrix.example }}-${{ hashFiles('examples/${{ matrix.example }}/Cargo.lock') }}
+
+    - name: Build example project
+      run: |
+        cd examples/${{ matrix.example }}
+        cargo build --verbose
+
+  # Comprehensive build verification using our script
+  build-verification:
+    name: Comprehensive Build Verification
+    runs-on: ubuntu-latest
+    needs: [library, examples]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: thumbv7em-none-eabihf
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+          examples/*/target
+        key: ${{ runner.os }}-full-build-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Make build script executable
+      run: chmod +x scripts/build-all.sh
+
+    - name: Run comprehensive build verification
+      run: ./scripts/build-all.sh

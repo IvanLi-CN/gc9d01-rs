@@ -37,8 +37,13 @@ pub trait Timer {
     fn after_millis(milliseconds: u64) -> impl core::future::Future<Output = ()>;
 }
 
+// Legacy buffer size for backward compatibility
 pub const BUF_SIZE: usize = 24 * 48 * 2;
 pub const MAX_DATA_LEN: usize = BUF_SIZE / 2;
+
+// Frame buffer size for full-screen rendering (160x40x2 bytes)
+pub const FRAME_BUF_SIZE: usize = 160 * 40 * 2;
+pub const MAX_FRAME_PIXELS: usize = FRAME_BUF_SIZE / 2;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -213,6 +218,7 @@ where
     rst: RST,
     config: Config,
     buffer: &'b mut [u8],
+    frame_buffer: Option<&'b mut [Rgb565]>, // Optional frame buffer for full-screen rendering
     _timer: PhantomData<TIMER>,
 }
 
@@ -236,6 +242,27 @@ where
             rst,
             config,
             buffer,
+            frame_buffer: None,
+            _timer: PhantomData,
+        }
+    }
+
+    /// Create a new GC9D01 instance with frame buffer support for full-screen rendering
+    pub fn new_with_frame_buffer(
+        config: Config,
+        bus: BUS,
+        dc: DC,
+        rst: RST,
+        buffer: &'b mut [u8],
+        frame_buffer: &'b mut [Rgb565],
+    ) -> Self {
+        Self {
+            bus,
+            dc,
+            rst,
+            config,
+            buffer,
+            frame_buffer: Some(frame_buffer),
             _timer: PhantomData,
         }
     }
@@ -540,7 +567,149 @@ where
         .await
     }
 
+    // Frame buffer operations
+
+    /// Clear the frame buffer with a solid color
+    pub fn clear_frame_buffer(&mut self, color: Rgb565) {
+        if let Some(ref mut frame_buf) = self.frame_buffer {
+            for pixel in frame_buf.iter_mut() {
+                *pixel = color;
+            }
+        }
+    }
+
+    /// Set a pixel in the frame buffer
+    pub fn set_pixel(&mut self, x: u16, y: u16, color: Rgb565) {
+        if let Some(ref mut frame_buf) = self.frame_buffer {
+            if x < self.config.width && y < self.config.height {
+                // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                // This matches the reference implementation in stm32g4-direct-spi-90-complex-patterns
+                let physical_x = 39 - y;
+                let physical_y = 159 - x;
+
+                // Calculate index in frame buffer using physical coordinates
+                // Frame buffer is organized as physical screen: 40 width × 160 height
+                let index = (physical_y as usize) * 40 + (physical_x as usize);
+                if index < frame_buf.len() {
+                    frame_buf[index] = color;
+                }
+            }
+        }
+    }
+
+    /// Fill a rectangular area in the frame buffer
+    pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: Rgb565) {
+        if let Some(ref mut frame_buf) = self.frame_buffer {
+            for row in y..(y + height) {
+                for col in x..(x + width) {
+                    if col < self.config.width && row < self.config.height {
+                        // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        let physical_x = 39 - row;
+                        let physical_y = 159 - col;
+
+                        // Calculate index in frame buffer using physical coordinates
+                        // Frame buffer is organized as physical screen: 40 width × 160 height
+                        let index = (physical_y as usize) * 40 + (physical_x as usize);
+                        if index < frame_buf.len() {
+                            frame_buf[index] = color;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Write pixel data to a rectangular area in the frame buffer
+    pub fn write_rect(&mut self, x: u16, y: u16, width: u16, height: u16, data: &[Rgb565]) {
+        if let Some(ref mut frame_buf) = self.frame_buffer {
+            let mut data_index = 0;
+            for row in y..(y + height) {
+                for col in x..(x + width) {
+                    if col < self.config.width
+                        && row < self.config.height
+                        && data_index < data.len()
+                    {
+                        // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        let physical_x = 39 - row;
+                        let physical_y = 159 - col;
+
+                        // Calculate index in frame buffer using physical coordinates
+                        // Frame buffer is organized as physical screen: 40 width × 160 height
+                        let index = (physical_y as usize) * 40 + (physical_x as usize);
+                        if index < frame_buf.len() {
+                            frame_buf[index] = data[data_index];
+                        }
+                        data_index += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Flush the frame buffer to the display
+    pub async fn flush(&mut self) -> Result<(), Error<BusE, PinE>> {
+        if self.frame_buffer.is_none() {
+            // No frame buffer available, do nothing
+            return Ok(());
+        }
+
+        // Set address window for the entire screen
+        self.set_address_window(0, 0, self.config.width - 1, self.config.height - 1)
+            .await?;
+        self.write_command(Instruction::MemoryWrite, &[]).await?;
+
+        // Start data transmission
+        let internal_dc_res: Result<(), PinE> = self.start_data_internal();
+        let dc_res: Result<(), Error<BusE, PinE>> = internal_dc_res.map_err(Error::Pin);
+        if dc_res.is_err() {
+            return dc_res;
+        }
+
+        // Get frame buffer length first to avoid borrowing issues
+        let total_pixels = self.frame_buffer.as_ref().unwrap().len();
+
+        // Send frame buffer data in chunks using the existing buffer
+        let mut current_pixel_index = 0;
+        let mut first_bus_error: Option<BusE> = None;
+
+        while current_pixel_index < total_pixels {
+            let mut buffer_idx = 0;
+
+            // Fill the internal buffer with as many pixels as possible
+            while buffer_idx < self.buffer.len() && current_pixel_index < total_pixels {
+                let color_val =
+                    RawU16::from(self.frame_buffer.as_ref().unwrap()[current_pixel_index])
+                        .into_inner();
+                self.buffer[buffer_idx] = (color_val >> 8) as u8;
+                self.buffer[buffer_idx + 1] = color_val as u8;
+                buffer_idx += 2;
+                current_pixel_index += 1;
+            }
+
+            // Send the buffer chunk
+            if buffer_idx > 0 {
+                if let Err(e) = self.bus.write(&self.buffer[..buffer_idx]).await {
+                    first_bus_error = Some(e);
+                    break;
+                }
+            }
+        }
+
+        if let Some(bus_err) = first_bus_error {
+            Err(Error::Bus(bus_err))
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn fill_color(&mut self, color: Rgb565) -> Result<(), Error<BusE, PinE>> {
+        // If frame buffer is available, update it instead of directly writing to screen
+        if self.frame_buffer.is_some() {
+            self.clear_frame_buffer(color);
+            return Ok(());
+        }
+
+        // Legacy behavior: directly write to screen
         // fill_color should always fill the entire physical screen area (0,0) to (width-1, height-1)
         // set_address_window now handles the mapping to GRAM based on orientation and offsets
         self.set_address_window(0, 0, self.config.width - 1, self.config.height - 1)
@@ -592,6 +761,13 @@ where
         height: u16,
         data: &[Rgb565],
     ) -> Result<(), Error<BusE, PinE>> {
+        // If frame buffer is available, update it instead of directly writing to screen
+        if self.frame_buffer.is_some() {
+            self.write_rect(x, y, width, height, data);
+            return Ok(());
+        }
+
+        // Legacy behavior: directly write to screen
         self.set_address_window(x, y, x + width - 1, y + height - 1)
             .await?;
         self.write_command(Instruction::MemoryWrite, &[]).await?;
