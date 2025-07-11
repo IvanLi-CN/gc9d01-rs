@@ -11,6 +11,18 @@ use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 use defmt::*;
 
+// Screen dimensions
+const LOGICAL_WIDTH: u16 = 160;   // Logical width after 270° rotation
+const LOGICAL_HEIGHT: u16 = 40;   // Logical height after 270° rotation
+const SCREEN_PIXELS: usize = (LOGICAL_WIDTH as usize) * (LOGICAL_HEIGHT as usize);
+
+// Physical chunk buffer to avoid memory issues
+// 物理屏幕布局：40宽×160高，我们按物理布局分块
+const PHYSICAL_CHUNK_HEIGHT: usize = 8;  // Process 8 physical lines at a time for better efficiency
+const PHYSICAL_CHUNK_WIDTH: usize = 40;   // Physical screen width
+const CHUNK_PIXELS: usize = PHYSICAL_CHUNK_WIDTH * PHYSICAL_CHUNK_HEIGHT;
+static mut CHUNK_BUFFER: [u16; CHUNK_PIXELS] = [0; CHUNK_PIXELS];
+
 // GC9D01 initialization function following the official reference document
 async fn initialize_gc9d01(
     spi: &mut Spi<'_, Async>,
@@ -249,7 +261,7 @@ async fn main(_spawner: Spawner) {
 
     // Configure SPI1 for GC9D01 communication
     let mut spi_config = SpiConfig::default();
-    spi_config.frequency = Hertz(16_000_000); // 16MHz SPI frequency
+    spi_config.frequency = Hertz(32_000_000); // 32MHz SPI frequency for maximum speed
 
     let mut spi = Spi::new_txonly(
         p.SPI1,
@@ -313,80 +325,148 @@ async fn main(_spawner: Spawner) {
         write_command(spi, cs, dc, 0x2C).await; // Memory write command
     }
 
-    // Fill area with solid color - optimized for 90° orientation
-    async fn fill_area_with_color_90(
+    // Chunk buffer manipulation functions
+    fn clear_chunk_buffer(color: u16) {
+        unsafe {
+            for i in 0..CHUNK_PIXELS {
+                CHUNK_BUFFER[i] = color;
+            }
+        }
+    }
+
+    // Convert HSV to RGB565
+    fn hsv_to_rgb565(h: f32, s: f32, v: f32) -> u16 {
+        let c = v * s;
+        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+        let m = v - c;
+
+        let (r_prime, g_prime, b_prime) = if h < 60.0 {
+            (c, x, 0.0)
+        } else if h < 120.0 {
+            (x, c, 0.0)
+        } else if h < 180.0 {
+            (0.0, c, x)
+        } else if h < 240.0 {
+            (0.0, x, c)
+        } else if h < 300.0 {
+            (x, 0.0, c)
+        } else {
+            (c, 0.0, x)
+        };
+
+        let r = ((r_prime + m) * 255.0) as u8;
+        let g = ((g_prime + m) * 255.0) as u8;
+        let b = ((b_prime + m) * 255.0) as u8;
+
+        // Convert to RGB565: RRRRR GGGGGG BBBBB
+        let r5 = (r >> 3) as u16;
+        let g6 = (g >> 2) as u16;
+        let b5 = (b >> 3) as u16;
+
+        (r5 << 11) | (g6 << 5) | b5
+    }
+
+    fn set_pixel_in_chunk(logical_x: u16, logical_y: u16, color: u16, physical_chunk_start_y: u16) {
+        // 检查逻辑坐标是否有效
+        if logical_x < LOGICAL_WIDTH && logical_y < LOGICAL_HEIGHT {
+            // 对于90°+180°旋转：logical(x,y) -> physical(39-y, 159-x)
+            let physical_x = 39 - logical_y;
+            let physical_y = 159 - logical_x;
+
+            // 检查物理坐标是否在当前物理chunk范围内
+            if physical_y >= physical_chunk_start_y && physical_y < physical_chunk_start_y + PHYSICAL_CHUNK_HEIGHT as u16 {
+                // 计算在chunk buffer中的位置
+                let chunk_physical_y = physical_y - physical_chunk_start_y;
+                let index = (chunk_physical_y as usize) * PHYSICAL_CHUNK_WIDTH + (physical_x as usize);
+
+                if index < CHUNK_PIXELS {
+                    unsafe {
+                        CHUNK_BUFFER[index] = color;
+                    }
+                }
+            }
+        }
+    }
+
+    fn fill_rect_in_chunk(logical_x0: u16, logical_y0: u16, logical_x1: u16, logical_y1: u16, color: u16, physical_chunk_start_y: u16) {
+        for logical_y in logical_y0..=logical_y1 {
+            for logical_x in logical_x0..=logical_x1 {
+                set_pixel_in_chunk(logical_x, logical_y, color, physical_chunk_start_y);
+            }
+        }
+    }
+
+    // Flush physical chunk buffer to display
+    async fn flush_chunk_buffer(
         spi: &mut Spi<'_, Async>,
         cs: &mut Output<'_>,
         dc: &mut Output<'_>,
-        x0: u16, y0: u16, x1: u16, y1: u16,
-        color: u16
+        physical_chunk_start_y: u16
     ) {
-        let width = x1 - x0 + 1;
-        let height = y1 - y0 + 1;
-        let pixel_count = (width as u32) * (height as u32);
 
-        debug!("Filling logical area ({},{}) to ({},{}) with color 0x{:04X} in 90°+180° orientation",
-               x0, y0, x1, y1, color);
 
-        // Transform logical coordinates (160x40) to physical coordinates (40x160) for 90° + 180° rotation
-        // 90° rotation: logical(x,y) -> physical(y, x)
-        // Then 180° rotation: physical(a,b) -> physical(39-a, 159-b)
-        // Combined: logical(x,y) -> physical(39-y, 159-x)
-        let physical_x0 = 39 - y1;  // Note: y1 maps to x0 (inverted)
-        let physical_y0 = 159 - x1; // Note: x1 maps to y0 (inverted)
-        let physical_x1 = 39 - y0;  // Note: y0 maps to x1 (inverted)
-        let physical_y1 = 159 - x0; // Note: x0 maps to y1 (inverted)
-
-        debug!("Transformed to physical coordinates ({},{}) to ({},{})",
-               physical_x0, physical_y0, physical_x1, physical_y1);
+        // Set address window for this physical chunk area
+        let physical_x0 = 0;
+        let physical_y0 = physical_chunk_start_y;
+        let physical_x1 = 39;  // Physical width - 1
+        let physical_y1 = physical_chunk_start_y + PHYSICAL_CHUNK_HEIGHT as u16 - 1;
 
         set_address_window(spi, cs, dc, physical_x0, physical_y0, physical_x1, physical_y1).await;
         start_memory_write(spi, cs, dc).await;
 
-        // Prepare color bytes
-        let color_bytes = [(color >> 8) as u8, (color & 0xFF) as u8];
+        // Convert chunk buffer to bytes and send
+        const CHUNK_BYTES: usize = CHUNK_PIXELS * 2;
+        let mut chunk_bytes = [0u8; CHUNK_BYTES];
 
-        // Use batch sending for better performance
-        const BATCH_SIZE: usize = 512; // Send 256 pixels at a time (512 bytes)
-        let mut batch_buffer = [0u8; BATCH_SIZE];
-
-        // Fill batch buffer with repeated color pattern
-        for i in (0..BATCH_SIZE).step_by(2) {
-            batch_buffer[i] = color_bytes[0];
-            batch_buffer[i + 1] = color_bytes[1];
-        }
-
-        let pixels_per_batch = BATCH_SIZE / 2;
-        let full_batches = pixel_count as usize / pixels_per_batch;
-        let remaining_pixels = pixel_count as usize % pixels_per_batch;
-
-        debug!("Sending {} full batches of {} pixels each", full_batches, pixels_per_batch);
-
-        // Send full batches
-        for batch in 0..full_batches {
-            dc.set_high(); // Data mode
-            cs.set_low();  // Select device
-            let _ = spi.write(&batch_buffer).await;
-            cs.set_high(); // Deselect device
-
-            // Log progress every 10% for large areas
-            if full_batches > 10 && (batch + 1) % (full_batches / 10) == 0 {
-                let progress = ((batch + 1) * 100) / full_batches;
-                debug!("Batch progress: {}%", progress);
+        unsafe {
+            for i in 0..CHUNK_PIXELS {
+                let pixel_color = CHUNK_BUFFER[i];
+                let byte_index = i * 2;
+                if byte_index + 1 < CHUNK_BYTES {
+                    chunk_bytes[byte_index] = (pixel_color >> 8) as u8;     // High byte
+                    chunk_bytes[byte_index + 1] = (pixel_color & 0xFF) as u8; // Low byte
+                }
             }
         }
 
-        // Send remaining pixels if any
-        if remaining_pixels > 0 {
-            debug!("Sending remaining {} pixels", remaining_pixels);
-            let remaining_bytes = remaining_pixels * 2;
-            dc.set_high(); // Data mode
-            cs.set_low();  // Select device
-            let _ = spi.write(&batch_buffer[0..remaining_bytes]).await;
-            cs.set_high(); // Deselect device
+        // Send chunk data in batches
+        const BATCH_SIZE: usize = 1024; // Send in larger batches for better efficiency
+        dc.set_high(); // Data mode
+        cs.set_low();  // Select device
+
+        let mut bytes_sent = 0;
+        while bytes_sent < CHUNK_BYTES {
+            let remaining = CHUNK_BYTES - bytes_sent;
+            let batch_size = remaining.min(BATCH_SIZE);
+            let _ = spi.write(&chunk_bytes[bytes_sent..bytes_sent + batch_size]).await;
+            bytes_sent += batch_size;
         }
 
-        debug!("Area fill completed - {} pixels sent in batches", pixel_count);
+        cs.set_high(); // Deselect device
+    }
+
+    // Render entire screen using physical chunked approach
+    async fn render_with_chunked_buffer<F>(
+        spi: &mut Spi<'_, Async>,
+        cs: &mut Output<'_>,
+        dc: &mut Output<'_>,
+        mut render_fn: F
+    )
+    where
+        F: FnMut(u16) // Closure that renders to logical screen, given physical chunk start y
+    {
+        // Process physical screen in chunks (40x160 physical screen)
+        for physical_chunk_start_y in (0..160).step_by(PHYSICAL_CHUNK_HEIGHT) {
+
+            // Clear chunk buffer
+            clear_chunk_buffer(0x0000); // Black
+
+            // Render content for entire logical screen, but only pixels that map to this physical chunk will be stored
+            render_fn(physical_chunk_start_y as u16);
+
+            // Flush physical chunk to display
+            flush_chunk_buffer(spi, cs, dc, physical_chunk_start_y as u16).await;
+        }
     }
 
 
@@ -416,15 +496,11 @@ async fn main(_spawner: Spawner) {
 
     let colors = [RED, GREEN, BLUE, YELLOW, MAGENTA, CYAN, WHITE, BLACK, ORANGE, PURPLE];
 
-    // Clear entire physical screen area first
-    // Physical GC9D01 screen is 40x160 pixels, rotated 270° to appear as 160x40
-    const PHYSICAL_WIDTH: u16 = 40;   // Physical screen width
-    const PHYSICAL_HEIGHT: u16 = 160; // Physical screen height
-    const LOGICAL_WIDTH: u16 = 160;   // Logical width after 270° rotation
-    const LOGICAL_HEIGHT: u16 = 40;   // Logical height after 270° rotation
-
+    // Clear entire screen using chunked buffer
     info!("Clearing entire logical screen area ({}x{}) with black...", LOGICAL_WIDTH, LOGICAL_HEIGHT);
-    fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
+    render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |_physical_chunk_start_y| {
+        clear_chunk_buffer(BLACK);
+    }).await;
     info!("Entire logical screen area cleared with black");
 
     Timer::after_secs(2).await;
@@ -435,175 +511,191 @@ async fn main(_spawner: Spawner) {
 
         // Fill with red
         info!("Filling screen with RED...");
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, RED).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |_physical_chunk_start_y| {
+            clear_chunk_buffer(RED);
+        }).await;
         Timer::after_secs(2).await;
 
         // Fill with green
         info!("Filling screen with GREEN...");
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, GREEN).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |_physical_chunk_start_y| {
+            clear_chunk_buffer(GREEN);
+        }).await;
         Timer::after_secs(2).await;
 
         // Fill with blue
         info!("Filling screen with BLUE...");
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLUE).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |_physical_chunk_start_y| {
+            clear_chunk_buffer(BLUE);
+        }).await;
         Timer::after_secs(2).await;
 
         // Pattern 1: Complex Checkerboard with Multiple Colors
         info!("Pattern 1: Complex Multi-Color Checkerboard (90°)");
 
-        // Clear screen first
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
-        Timer::after_secs(1).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Create a complex checkerboard pattern for 160×40 logical screen
+            let block_width = 20;  // 160 / 8 = 20 pixels wide
+            let block_height = 20; // 40 / 2 = 20 pixels high
+            let blocks_x = 8;      // 8 blocks across (160 pixels width)
+            let blocks_y = 2;      // 2 blocks down (40 pixels height)
 
-        // Create a complex checkerboard pattern for 160×40 logical screen
-        // 8×2 blocks (20×20 pixels each) - similar to stm32g4 example
-        let block_width = 20;  // 160 / 8 = 20 pixels wide
-        let block_height = 20; // 40 / 2 = 20 pixels high
-        let blocks_x = 8;      // 8 blocks across (160 pixels width)
-        let blocks_y = 2;      // 2 blocks down (40 pixels height)
+            for row in 0..blocks_y {
+                for col in 0..blocks_x {
+                    let color_index = ((row * blocks_x + col) as usize) % colors.len();
+                    let color = colors[color_index];
 
-        for row in 0..blocks_y {
-            for col in 0..blocks_x {
-                let color_index = ((row * blocks_x + col) as usize) % colors.len();
-                let color = colors[color_index];
+                    let x = col * block_width;
+                    let y = row * block_height;
 
-                let x = col * block_width;
-                let y = row * block_height;
-
-                // Fill the block area
-                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                       x, y, x + block_width - 1, y + block_height - 1, color).await;
+                    // Fill the block area in chunk buffer
+                    fill_rect_in_chunk(x, y, x + block_width - 1, y + block_height - 1, color, physical_chunk_start_y);
+                }
             }
-        }
+        }).await;
 
         info!("Complex checkerboard pattern completed");
-        Timer::after_secs(10).await;
+        Timer::after_secs(5).await;
 
-        // Pattern 2: Gradient Stripes
-        info!("Pattern 2: Gradient Color Stripes (90°)");
+        // Pattern 2: 10x10 Color Checkerboard
+        info!("Pattern 2: 10x10 Color Checkerboard (90°)");
 
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
-        Timer::after_secs(1).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Create a 10x10 color checkerboard for 160×40 logical screen
+            let block_width = 10;
+            let block_height = 10;
+            let blocks_x = 16;     // 160 / 10 = 16 blocks across
+            let blocks_y = 4;      // 40 / 10 = 4 blocks down
 
-        // Create vertical stripes with gradient effect for 160×40 logical screen
-        let stripe_width = 16; // 160 / 10 = 16 pixels per stripe
-        let stripes = 10;
+            for row in 0..blocks_y {
+                for col in 0..blocks_x {
+                    let color_index = ((row + col) as usize) % colors.len();
+                    let color = colors[color_index];
 
-        for stripe in 0..stripes {
-            let x = stripe * stripe_width;
+                    let x = col * block_width;
+                    let y = row * block_height;
 
-            // Create gradient within each stripe (height: 40)
-            for y in 0..40 {
-                let intensity = (y as f32 / 39.0 * 31.0) as u16;
-                let gradient_color = match stripe % 3 {
-                    0 => intensity << 11, // Red gradient (bits 15-11)
-                    1 => intensity << 6,  // Green gradient (bits 10-5, but intensity*2 for 6-bit)
-                    _ => intensity,       // Blue gradient (bits 4-0)
-                };
-
-                // Fill one horizontal line of the stripe
-                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                       x, y, x + stripe_width - 1, y, gradient_color).await;
+                    // Fill the block area in chunk buffer
+                    fill_rect_in_chunk(x, y, x + block_width - 1, y + block_height - 1, color, physical_chunk_start_y);
+                }
             }
-        }
+        }).await;
 
-        info!("Gradient stripes pattern completed");
-        Timer::after_secs(10).await;
+        info!("Pattern 2 completed");
+        Timer::after_secs(5).await;
 
-        // Pattern 3: Concentric Rectangles
-        info!("Pattern 3: Concentric Rectangles (90°)");
+        // Pattern 3: Gradient Stripes
+        info!("Pattern 3: Gradient Color Stripes (90°)");
 
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
-        Timer::after_secs(1).await;
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Create vertical stripes with gradient effect for 160×40 logical screen
+            let stripe_width = 16; // 160 / 10 = 16 pixels per stripe
+            let stripes = 10;
 
-        // Draw concentric rectangles from outside to inside
-        for layer in 0..5 {
-            let color = colors[layer % colors.len()];
+            for stripe in 0..stripes {
+                let x = stripe * stripe_width;
 
-            // Top and bottom borders for 160×40 logical screen
-            for border_y in [layer * 4, 39 - layer * 4] {
-                if border_y < 40 {
-                    let start_x = layer * 16;
-                    let end_x = 159 - layer * 16;
-                    if start_x <= end_x && end_x < 160 {
-                        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                               start_x as u16, border_y as u16, end_x as u16, border_y as u16, color).await;
+                // Create gradient within each stripe (height: 40)
+                for y in 0..LOGICAL_HEIGHT {
+                    let intensity = (y as f32 / 39.0 * 31.0) as u16;
+                    let gradient_color = match stripe % 3 {
+                        0 => intensity << 11, // Red gradient (bits 15-11)
+                        1 => intensity << 6,  // Green gradient (bits 10-5, but intensity*2 for 6-bit)
+                        _ => intensity,       // Blue gradient (bits 4-0)
+                    };
+
+                    // Fill one horizontal line of the stripe in chunk buffer
+                    fill_rect_in_chunk(x, y, x + stripe_width - 1, y, gradient_color, physical_chunk_start_y);
+                }
+            }
+        }).await;
+
+        info!("Pattern 3 completed");
+        Timer::after_secs(5).await;
+
+        // Pattern 4: Rainbow Gradient with Saturation
+        info!("Pattern 4: Rainbow Gradient with Saturation (90°)");
+
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Create rainbow gradient: long edge (160px) = hue, short edge (40px) = saturation
+            for logical_y in 0..LOGICAL_HEIGHT {
+                for logical_x in 0..LOGICAL_WIDTH {
+                    // Hue varies along the long edge (160 pixels)
+                    let hue = (logical_x as f32 / LOGICAL_WIDTH as f32) * 360.0;
+
+                    // Saturation varies along the short edge (40 pixels): 0% to 100%
+                    let saturation = logical_y as f32 / (LOGICAL_HEIGHT - 1) as f32;
+
+                    // Convert HSV to RGB565
+                    let rgb = hsv_to_rgb565(hue, saturation, 1.0); // Full brightness
+
+                    set_pixel_in_chunk(logical_x, logical_y, rgb, physical_chunk_start_y);
+                }
+            }
+        }).await;
+
+        info!("Pattern 4 completed");
+        Timer::after_secs(5).await;
+
+        // Pattern 5: Concentric Rectangles
+        info!("Pattern 5: Concentric Rectangles (90°)");
+
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Draw concentric rectangles from outside to inside
+            for layer in 0..5 {
+                let color = colors[layer % colors.len()];
+
+                // Top and bottom borders for 160×40 logical screen
+                for border_y in [layer * 4, 39 - layer * 4] {
+                    if border_y < 40 {
+                        let start_x = layer * 16;
+                        let end_x = 159 - layer * 16;
+                        if start_x <= end_x && end_x < 160 {
+                            fill_rect_in_chunk(start_x as u16, border_y as u16, end_x as u16, border_y as u16, color, physical_chunk_start_y);
+                        }
+                    }
+                }
+
+                // Left and right borders for 160×40 logical screen
+                for border_x in [layer * 16, 159 - layer * 16] {
+                    if border_x < 160 {
+                        let start_y = layer * 4;
+                        let end_y = 39 - layer * 4;
+                        if start_y <= end_y && end_y < 40 {
+                            fill_rect_in_chunk(border_x as u16, start_y as u16, border_x as u16, end_y as u16, color, physical_chunk_start_y);
+                        }
                     }
                 }
             }
+        }).await;
 
-            // Left and right borders for 160×40 logical screen
-            for border_x in [layer * 16, 159 - layer * 16] {
-                if border_x < 160 {
-                    let start_y = layer * 4;
-                    let end_y = 39 - layer * 4;
-                    if start_y <= end_y && end_y < 40 {
-                        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                               border_x as u16, start_y as u16, border_x as u16, end_y as u16, color).await;
+        info!("Pattern 5 completed");
+        Timer::after_secs(5).await;
+
+        // Pattern 6: Diagonal Lines Pattern
+        info!("Pattern 6: Diagonal Lines Pattern (90°)");
+
+        render_with_chunked_buffer(&mut spi, &mut cs_pin, &mut dc_pin, |physical_chunk_start_y| {
+            // Draw diagonal lines across the screen for 160×40 logical screen
+            for line in 0..20 {
+                let color = colors[line % colors.len()];
+                let spacing = 8;
+
+                // Draw diagonal line from top-left to bottom-right (160×40)
+                for step in 0..200 {
+                    let x = (step + line * spacing) % 160; // screen width
+                    let y = (step * 40 / 160) % 40;        // screen height
+
+                    if x < 160 && y < 40 {
+                        set_pixel_in_chunk(x as u16, y as u16, color, physical_chunk_start_y);
                     }
                 }
             }
-        }
+        }).await;
 
-        info!("Concentric rectangles pattern completed");
-        Timer::after_secs(10).await;
+        info!("Pattern 6 completed");
+        Timer::after_secs(5).await;
 
-        // Pattern 4: Diagonal Lines Pattern
-        info!("Pattern 4: Diagonal Lines Pattern (90°)");
 
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
-        Timer::after_secs(1).await;
-
-        // Draw diagonal lines across the screen for 160×40 logical screen
-        for line in 0..20 {
-            let color = colors[line % colors.len()];
-            let spacing = 8;
-
-            // Draw diagonal line from top-left to bottom-right (160×40)
-            for step in 0..200 {
-                let x = (step + line * spacing) % 160; // screen width
-                let y = (step * 40 / 160) % 40;        // screen height
-
-                if x < 160 && y < 40 {
-                    fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                           x as u16, y as u16, x as u16, y as u16, color).await;
-                }
-            }
-        }
-
-        info!("Diagonal lines pattern completed");
-        Timer::after_secs(10).await;
-
-        // Pattern 5: Spiral Pattern
-        info!("Pattern 5: Spiral Pattern (90°)");
-
-        fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin, 0, 0, LOGICAL_WIDTH - 1, LOGICAL_HEIGHT - 1, BLACK).await;
-        Timer::after_secs(1).await;
-
-        // Draw a simplified spiral pattern for 160×40 logical screen
-        let center_x = 80;  // center X (160/2)
-        let center_y = 20;  // center Y (40/2)
-
-        // Create a simple expanding square spiral
-        for step in 0..400 {
-            let radius = step / 20; // Expand every 20 steps
-            let angle_step = step % 20;
-
-            let (x, y) = match angle_step / 5 {
-                0 => (center_x + radius, center_y + (angle_step % 5) - 2), // Right side
-                1 => (center_x + radius - (angle_step % 5), center_y + 2), // Top side
-                2 => (center_x - radius, center_y + 2 - (angle_step % 5)), // Left side
-                _ => (center_x - radius + (angle_step % 5), center_y - 2), // Bottom side
-            };
-
-            if x >= 0 && x < 160 && y >= 0 && y < 40 {
-                let color = colors[(step / 40) % colors.len()];
-                fill_area_with_color_90(&mut spi, &mut cs_pin, &mut dc_pin,
-                                       x as u16, y as u16, x as u16, y as u16, color).await;
-            }
-        }
-
-        info!("Spiral pattern completed");
-        Timer::after_secs(10).await;
     }
 }
