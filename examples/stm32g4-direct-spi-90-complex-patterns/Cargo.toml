@@ -1,5 +1,5 @@
 [package]
-name = "stm32g4-180-complex-patterns"
+name = "stm32g4-direct-spi-90-complex-patterns"
 version = "0.1.0"
 edition = "2021"
 
