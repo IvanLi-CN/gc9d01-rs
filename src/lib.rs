@@ -401,12 +401,18 @@ where
         .await?; // 0xB6
 
         self.write_command(Instruction::SleepOut, &[]).await?; // 0x11
-        TIMER::after_millis(200).await;
+        #[allow(unused_must_use)]
+        {
+            TIMER::after_millis(200).await;
+        }
         self.write_command(Instruction::DisplayOn, &[]).await?; // 0x29
 
         // Memory write command - ready for pixel data (as in working example)
         self.write_command(Instruction::MemoryWrite, &[]).await?; // 0x2C
-        TIMER::after_millis(100).await;
+        #[allow(unused_must_use)]
+        {
+            TIMER::after_millis(100).await;
+        }
 
         Ok(()) // init function ends here
     }
@@ -414,9 +420,15 @@ where
     pub async fn reset(&mut self) -> Result<(), Error<BusE, PinE>> {
         // 硬件复位序列: RST 拉低 -> 延时10ms -> RST 拉高 -> 延时120ms
         self.rst.set_low().map_err(Error::Pin)?;
-        TIMER::after_millis(10).await;
+        #[allow(unused_must_use)]
+        {
+            TIMER::after_millis(10).await;
+        }
         self.rst.set_high().map_err(Error::Pin)?;
-        TIMER::after_millis(120).await;
+        #[allow(unused_must_use)]
+        {
+            TIMER::after_millis(120).await;
+        }
         Ok(())
     }
 
