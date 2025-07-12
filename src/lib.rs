@@ -16,8 +16,8 @@ use core::marker::PhantomData;
 #[cfg(feature = "defmt")]
 use defmt;
 
-use embedded_graphics_core::pixelcolor::{raw::RawU16, Rgb565};
-use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, RawData, Size};
+use embedded_graphics_core::pixelcolor::Rgb565;
+use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, Size};
 use embedded_graphics_core::Pixel as EgPixel;
 use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::Error as SpiError; // Directly use async SpiBus
@@ -37,10 +37,6 @@ pub trait Timer {
     /// Expire after the specified number of milliseconds.
     fn after_millis(milliseconds: u64) -> impl core::future::Future<Output = ()>;
 }
-
-// Legacy buffer size for backward compatibility
-pub const BUF_SIZE: usize = 24 * 48 * 2;
-pub const MAX_DATA_LEN: usize = BUF_SIZE / 2;
 
 // Frame buffer size for full-screen rendering (160x40x2 bytes)
 pub const FRAME_BUF_SIZE: usize = 160 * 40 * 2;
@@ -218,7 +214,6 @@ where
     dc: DC,
     rst: RST,
     config: Config,
-    buffer: &'b mut [u8],
     frame_buffer: &'b mut [Rgb565], // Required frame buffer for full-screen rendering
     _timer: PhantomData<TIMER>,
 }
@@ -237,20 +232,12 @@ where
     PinE: core::fmt::Debug,
 {
     /// Create a new GC9D01 instance with frame buffer support for full-screen rendering
-    pub fn new(
-        config: Config,
-        bus: BUS,
-        dc: DC,
-        rst: RST,
-        buffer: &'b mut [u8],
-        frame_buffer: &'b mut [Rgb565],
-    ) -> Self {
+    pub fn new(config: Config, bus: BUS, dc: DC, rst: RST, frame_buffer: &'b mut [Rgb565]) -> Self {
         Self {
             bus,
             dc,
             rst,
             config,
-            buffer,
             frame_buffer,
             _timer: PhantomData,
         }
@@ -659,39 +646,30 @@ where
             return dc_res;
         }
 
-        // Get frame buffer length first to avoid borrowing issues
-        let total_pixels = self.frame_buffer.len();
+        // Send frame buffer data in chunks to respect DMA limitations
+        // Convert frame_buffer to bytes view without copying
+        let frame_bytes = unsafe {
+            core::slice::from_raw_parts(
+                self.frame_buffer.as_ptr() as *const u8,
+                self.frame_buffer.len() * 2,
+            )
+        };
 
-        // Send frame buffer data in chunks using the existing buffer
-        let mut current_pixel_index = 0;
-        let mut first_bus_error: Option<BusE> = None;
+        // Send in chunks respecting DMA 16-bit counter limit (max 65535 bytes)
+        // Use conservative 4096 bytes (2048 pixels) for safety
+        const CHUNK_SIZE: usize = 4096;
+        let mut offset = 0;
 
-        while current_pixel_index < total_pixels {
-            let mut buffer_idx = 0;
-
-            // Fill the internal buffer with as many pixels as possible
-            while buffer_idx < self.buffer.len() && current_pixel_index < total_pixels {
-                let color_val = RawU16::from(self.frame_buffer[current_pixel_index]).into_inner();
-                self.buffer[buffer_idx] = (color_val >> 8) as u8;
-                self.buffer[buffer_idx + 1] = color_val as u8;
-                buffer_idx += 2;
-                current_pixel_index += 1;
-            }
-
-            // Send the buffer chunk
-            if buffer_idx > 0 {
-                if let Err(e) = self.bus.write(&self.buffer[..buffer_idx]).await {
-                    first_bus_error = Some(e);
-                    break;
-                }
-            }
+        while offset < frame_bytes.len() {
+            let chunk_end = core::cmp::min(offset + CHUNK_SIZE, frame_bytes.len());
+            self.bus
+                .write(&frame_bytes[offset..chunk_end])
+                .await
+                .map_err(Error::Bus)?;
+            offset = chunk_end;
         }
 
-        if let Some(bus_err) = first_bus_error {
-            Err(Error::Bus(bus_err))
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     pub fn fill_color(&mut self, color: Rgb565) {
