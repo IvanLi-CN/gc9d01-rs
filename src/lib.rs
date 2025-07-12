@@ -14,6 +14,7 @@
 // Assuming "async" feature is always on for this simplified test
 use core::marker::PhantomData;
 
+use embedded_graphics_core::pixelcolor::raw::RawData;
 use embedded_graphics_core::pixelcolor::Rgb565;
 use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, Size};
 use embedded_graphics_core::Pixel as EgPixel;
@@ -229,6 +230,19 @@ where
     BusE: core::fmt::Debug + SpiError,
     PinE: core::fmt::Debug,
 {
+    /// Convert Rgb565 color to correct byte order for GC9D01 display
+    /// GC9D01 expects RGB565 data in big-endian format (high byte first)
+    fn convert_color_byte_order(color: Rgb565) -> Rgb565 {
+        // Convert Rgb565 to RawU16 to get the raw u16 value
+        let raw_pixel: embedded_graphics_core::pixelcolor::raw::RawU16 = color.into();
+        let pixel_value: u16 = raw_pixel.into_inner();
+
+        // Swap bytes: convert from little-endian to big-endian
+        let swapped_value = pixel_value.swap_bytes();
+
+        // Convert back to Rgb565
+        embedded_graphics_core::pixelcolor::raw::RawU16::new(swapped_value).into()
+    }
     /// Create a new GC9D01 instance with frame buffer support for full-screen rendering
     pub fn new(config: Config, bus: BUS, dc: DC, rst: RST, frame_buffer: &'b mut [Rgb565]) -> Self {
         Self {
@@ -554,14 +568,19 @@ where
 
     /// Clear the frame buffer with a solid color
     pub fn clear_frame_buffer(&mut self, color: Rgb565) {
+        // Convert color to correct byte order for GC9D01 display
+        let converted_color = Self::convert_color_byte_order(color);
         for pixel in self.frame_buffer.iter_mut() {
-            *pixel = color;
+            *pixel = converted_color;
         }
     }
 
     /// Set a pixel in the frame buffer
     pub fn set_pixel(&mut self, x: u16, y: u16, color: Rgb565) {
         if x < self.config.width && y < self.config.height {
+            // Convert color to correct byte order for GC9D01 display
+            let converted_color = Self::convert_color_byte_order(color);
+
             // Apply coordinate transformation matching the working reference example
             // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
             // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
@@ -572,13 +591,16 @@ where
             // Frame buffer is organized as physical screen: 40 width × 160 height
             let index = (physical_y as usize) * 40 + (physical_x as usize);
             if index < self.frame_buffer.len() {
-                self.frame_buffer[index] = color;
+                self.frame_buffer[index] = converted_color;
             }
         }
     }
 
     /// Fill a rectangular area in the frame buffer
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: Rgb565) {
+        // Convert color to correct byte order for GC9D01 display
+        let converted_color = Self::convert_color_byte_order(color);
+
         for row in y..(y + height) {
             for col in x..(x + width) {
                 if col < self.config.width && row < self.config.height {
@@ -592,7 +614,7 @@ where
                     // Frame buffer is organized as physical screen: 40 width × 160 height
                     let index = (physical_y as usize) * 40 + (physical_x as usize);
                     if index < self.frame_buffer.len() {
-                        self.frame_buffer[index] = color;
+                        self.frame_buffer[index] = converted_color;
                     }
                 }
             }
@@ -605,6 +627,9 @@ where
         for row in y..(y + height) {
             for col in x..(x + width) {
                 if col < self.config.width && row < self.config.height && data_index < data.len() {
+                    // Convert color to correct byte order for GC9D01 display
+                    let converted_color = Self::convert_color_byte_order(data[data_index]);
+
                     // Apply coordinate transformation matching the working reference example
                     // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
                     // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
@@ -615,7 +640,7 @@ where
                     // Frame buffer is organized as physical screen: 40 width × 160 height
                     let index = (physical_y as usize) * 40 + (physical_x as usize);
                     if index < self.frame_buffer.len() {
-                        self.frame_buffer[index] = data[data_index];
+                        self.frame_buffer[index] = converted_color;
                     }
                     data_index += 1;
                 }
@@ -672,11 +697,13 @@ where
 
     pub fn fill_color(&mut self, color: Rgb565) {
         // Only operate on frame buffer - no hardware operations
+        // clear_frame_buffer already handles color conversion
         self.clear_frame_buffer(color);
     }
 
     pub fn write_area(&mut self, x: u16, y: u16, width: u16, height: u16, data: &[Rgb565]) {
         // Only operate on frame buffer - no hardware operations
+        // write_rect already handles color conversion
         self.write_rect(x, y, width, height, data);
     }
 }
