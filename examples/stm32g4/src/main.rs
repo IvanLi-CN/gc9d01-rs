@@ -107,6 +107,10 @@ async fn main(_spawner: Spawner) {
     static DISPLAY_BUFFER_CELL: StaticCell<[u8; gc9d01::BUF_SIZE]> = StaticCell::new();
     let buffer_slice: &mut [u8] = DISPLAY_BUFFER_CELL.init([0; gc9d01::BUF_SIZE]);
 
+    // Create frame buffer for full-screen rendering
+    static FRAME_BUFFER_CELL: StaticCell<[Rgb565; 6400]> = StaticCell::new(); // 160x40 = 6400 pixels
+    let frame_buffer: &mut [Rgb565] = FRAME_BUFFER_CELL.init([Rgb565::BLACK; 6400]);
+
     let mut display: GC9D01<
         '_,
         EmbassySpiDevice<
@@ -118,7 +122,7 @@ async fn main(_spawner: Spawner) {
         Output<'_>,
         Output<'_>,
         EmbassyDisplayTimer,
-    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, buffer_slice);
+    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, buffer_slice, frame_buffer);
 
     info!("Initializing display...");
     match display.init().await {

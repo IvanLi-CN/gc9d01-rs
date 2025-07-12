@@ -219,7 +219,7 @@ where
     rst: RST,
     config: Config,
     buffer: &'b mut [u8],
-    frame_buffer: Option<&'b mut [Rgb565]>, // Optional frame buffer for full-screen rendering
+    frame_buffer: &'b mut [Rgb565], // Required frame buffer for full-screen rendering
     _timer: PhantomData<TIMER>,
 }
 
@@ -236,20 +236,8 @@ where
     BusE: core::fmt::Debug + SpiError,
     PinE: core::fmt::Debug,
 {
-    pub fn new(config: Config, bus: BUS, dc: DC, rst: RST, buffer: &'b mut [u8]) -> Self {
-        Self {
-            bus,
-            dc,
-            rst,
-            config,
-            buffer,
-            frame_buffer: None,
-            _timer: PhantomData,
-        }
-    }
-
     /// Create a new GC9D01 instance with frame buffer support for full-screen rendering
-    pub fn new_with_frame_buffer(
+    pub fn new(
         config: Config,
         bus: BUS,
         dc: DC,
@@ -263,7 +251,7 @@ where
             rst,
             config,
             buffer,
-            frame_buffer: Some(frame_buffer),
+            frame_buffer,
             _timer: PhantomData,
         }
     }
@@ -577,51 +565,45 @@ where
 
     /// Clear the frame buffer with a solid color
     pub fn clear_frame_buffer(&mut self, color: Rgb565) {
-        if let Some(ref mut frame_buf) = self.frame_buffer {
-            for pixel in frame_buf.iter_mut() {
-                *pixel = color;
-            }
+        for pixel in self.frame_buffer.iter_mut() {
+            *pixel = color;
         }
     }
 
     /// Set a pixel in the frame buffer
     pub fn set_pixel(&mut self, x: u16, y: u16, color: Rgb565) {
-        if let Some(ref mut frame_buf) = self.frame_buffer {
-            if x < self.config.width && y < self.config.height {
-                // Apply coordinate transformation matching the working reference example
-                // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                let physical_x = 39 - y;
-                let physical_y = 159 - x;
+        if x < self.config.width && y < self.config.height {
+            // Apply coordinate transformation matching the working reference example
+            // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+            // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
+            let physical_x = 39 - y;
+            let physical_y = 159 - x;
 
-                // Calculate index in frame buffer using physical coordinates
-                // Frame buffer is organized as physical screen: 40 width × 160 height
-                let index = (physical_y as usize) * 40 + (physical_x as usize);
-                if index < frame_buf.len() {
-                    frame_buf[index] = color;
-                }
+            // Calculate index in frame buffer using physical coordinates
+            // Frame buffer is organized as physical screen: 40 width × 160 height
+            let index = (physical_y as usize) * 40 + (physical_x as usize);
+            if index < self.frame_buffer.len() {
+                self.frame_buffer[index] = color;
             }
         }
     }
 
     /// Fill a rectangular area in the frame buffer
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: Rgb565) {
-        if let Some(ref mut frame_buf) = self.frame_buffer {
-            for row in y..(y + height) {
-                for col in x..(x + width) {
-                    if col < self.config.width && row < self.config.height {
-                        // Apply coordinate transformation matching the working reference example
-                        // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                        // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                        let physical_x = 39 - row;
-                        let physical_y = 159 - col;
+        for row in y..(y + height) {
+            for col in x..(x + width) {
+                if col < self.config.width && row < self.config.height {
+                    // Apply coordinate transformation matching the working reference example
+                    // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                    // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
+                    let physical_x = 39 - row;
+                    let physical_y = 159 - col;
 
-                        // Calculate index in frame buffer using physical coordinates
-                        // Frame buffer is organized as physical screen: 40 width × 160 height
-                        let index = (physical_y as usize) * 40 + (physical_x as usize);
-                        if index < frame_buf.len() {
-                            frame_buf[index] = color;
-                        }
+                    // Calculate index in frame buffer using physical coordinates
+                    // Frame buffer is organized as physical screen: 40 width × 160 height
+                    let index = (physical_y as usize) * 40 + (physical_x as usize);
+                    if index < self.frame_buffer.len() {
+                        self.frame_buffer[index] = color;
                     }
                 }
             }
@@ -630,28 +612,23 @@ where
 
     /// Write pixel data to a rectangular area in the frame buffer
     pub fn write_rect(&mut self, x: u16, y: u16, width: u16, height: u16, data: &[Rgb565]) {
-        if let Some(ref mut frame_buf) = self.frame_buffer {
-            let mut data_index = 0;
-            for row in y..(y + height) {
-                for col in x..(x + width) {
-                    if col < self.config.width
-                        && row < self.config.height
-                        && data_index < data.len()
-                    {
-                        // Apply coordinate transformation matching the working reference example
-                        // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                        // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                        let physical_x = 39 - row;
-                        let physical_y = 159 - col;
+        let mut data_index = 0;
+        for row in y..(y + height) {
+            for col in x..(x + width) {
+                if col < self.config.width && row < self.config.height && data_index < data.len() {
+                    // Apply coordinate transformation matching the working reference example
+                    // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                    // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
+                    let physical_x = 39 - row;
+                    let physical_y = 159 - col;
 
-                        // Calculate index in frame buffer using physical coordinates
-                        // Frame buffer is organized as physical screen: 40 width × 160 height
-                        let index = (physical_y as usize) * 40 + (physical_x as usize);
-                        if index < frame_buf.len() {
-                            frame_buf[index] = data[data_index];
-                        }
-                        data_index += 1;
+                    // Calculate index in frame buffer using physical coordinates
+                    // Frame buffer is organized as physical screen: 40 width × 160 height
+                    let index = (physical_y as usize) * 40 + (physical_x as usize);
+                    if index < self.frame_buffer.len() {
+                        self.frame_buffer[index] = data[data_index];
                     }
+                    data_index += 1;
                 }
             }
         }
@@ -659,11 +636,6 @@ where
 
     /// Flush the frame buffer to the display
     pub async fn flush(&mut self) -> Result<(), Error<BusE, PinE>> {
-        if self.frame_buffer.is_none() {
-            // No frame buffer available, do nothing
-            return Ok(());
-        }
-
         // Set address window for the entire physical screen (40x160)
         // Use physical coordinates directly, not logical coordinates
         // ColumnAddressSet (0x2A) sets X coordinates (0 to 39 for physical width)
@@ -688,7 +660,7 @@ where
         }
 
         // Get frame buffer length first to avoid borrowing issues
-        let total_pixels = self.frame_buffer.as_ref().unwrap().len();
+        let total_pixels = self.frame_buffer.len();
 
         // Send frame buffer data in chunks using the existing buffer
         let mut current_pixel_index = 0;
@@ -699,9 +671,7 @@ where
 
             // Fill the internal buffer with as many pixels as possible
             while buffer_idx < self.buffer.len() && current_pixel_index < total_pixels {
-                let color_val =
-                    RawU16::from(self.frame_buffer.as_ref().unwrap()[current_pixel_index])
-                        .into_inner();
+                let color_val = RawU16::from(self.frame_buffer[current_pixel_index]).into_inner();
                 self.buffer[buffer_idx] = (color_val >> 8) as u8;
                 self.buffer[buffer_idx + 1] = color_val as u8;
                 buffer_idx += 2;
@@ -726,16 +696,12 @@ where
 
     pub fn fill_color(&mut self, color: Rgb565) {
         // Only operate on frame buffer - no hardware operations
-        if let Some(_) = self.frame_buffer {
-            self.clear_frame_buffer(color);
-        }
+        self.clear_frame_buffer(color);
     }
 
     pub fn write_area(&mut self, x: u16, y: u16, width: u16, height: u16, data: &[Rgb565]) {
         // Only operate on frame buffer - no hardware operations
-        if let Some(_) = self.frame_buffer {
-            self.write_rect(x, y, width, height, data);
-        }
+        self.write_rect(x, y, width, height, data);
     }
 }
 

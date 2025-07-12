@@ -53,7 +53,7 @@ let config = Config {
 };
 
 // Initialize display (async example)
-let mut display = GC9D01::new_with_frame_buffer(
+let mut display = GC9D01::new(
     config, spi_device, dc_pin, rst_pin,
     buffer, frame_buffer
 );
@@ -178,7 +178,7 @@ static DISPLAY_BUFFER: [u8; gc9d01::BUF_SIZE] = [0; gc9d01::BUF_SIZE];
 static FRAME_BUFFER: [Rgb565; 6400] = [Rgb565::BLACK; 6400]; // 160x40
 
 // Create display with frame buffer
-let mut display = GC9D01::new_with_frame_buffer(
+let mut display = GC9D01::new(
     config, spi_device, dc_pin, rst_pin,
     &mut DISPLAY_BUFFER, &mut FRAME_BUFFER
 );

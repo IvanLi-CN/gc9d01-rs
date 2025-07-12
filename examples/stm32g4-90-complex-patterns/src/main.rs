@@ -123,7 +123,7 @@ async fn main(_spawner: Spawner) {
         Output<'_>,
         Output<'_>,
         EmbassyDisplayTimer,
-    > = GC9D01::new_with_frame_buffer(display_config, spi_device, dc_pin, rst_pin, buffer_slice, frame_buffer);
+    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, buffer_slice, frame_buffer);
 
     info!("Initializing display...");
     match display.init().await {
