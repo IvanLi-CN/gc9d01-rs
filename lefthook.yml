@@ -7,7 +7,7 @@ pre-commit:
       stage_fixed: true
     clippy:
       glob: "*.{rs}"
-      run: cargo clippy --all-targets --all-features
+      run: cargo clippy --all-targets --all-features -- -D warnings
     build-verification:
       run: ./scripts/build-all.sh
       skip:

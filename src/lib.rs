@@ -13,8 +13,6 @@
 
 // Assuming "async" feature is always on for this simplified test
 use core::marker::PhantomData;
-#[cfg(feature = "defmt")]
-use defmt;
 
 use embedded_graphics_core::pixelcolor::Rgb565;
 use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, Size};
@@ -427,31 +425,23 @@ where
         instruction: Instruction,
         params: &[u8],
     ) -> Result<(), Error<BusE, PinE>> {
-        let dc_low_res = self.dc.set_low().map_err(Error::Pin);
-        if dc_low_res.is_err() {
-            return dc_low_res;
-        }
+        self.dc.set_low().map_err(Error::Pin)?;
 
         let cmd_bytes = [instruction as u8];
         let cmd_res = self.bus.write(&cmd_bytes).await.map_err(Error::Bus);
 
         if cmd_res.is_ok() && !params.is_empty() {
-            let dc_high_res = self.dc.set_high().map_err(Error::Pin);
-            if dc_high_res.is_err() {
-                return dc_high_res;
-            }
+            self.dc.set_high().map_err(Error::Pin)?;
             let param_res = self.bus.write(params).await.map_err(Error::Bus);
             if param_res.is_err() {
                 param_res
             } else {
                 Ok(())
             }
+        } else if cmd_res.is_err() {
+            cmd_res
         } else {
-            if cmd_res.is_err() {
-                cmd_res
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
     }
 
@@ -640,11 +630,7 @@ where
         self.write_command(Instruction::MemoryWrite, &[]).await?;
 
         // Start data transmission
-        let internal_dc_res: Result<(), PinE> = self.start_data_internal();
-        let dc_res: Result<(), Error<BusE, PinE>> = internal_dc_res.map_err(Error::Pin);
-        if dc_res.is_err() {
-            return dc_res;
-        }
+        self.start_data_internal().map_err(Error::Pin)?;
 
         // Send frame buffer data in chunks to respect DMA limitations
         // Convert frame_buffer to bytes view without copying
