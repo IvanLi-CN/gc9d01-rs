@@ -16,8 +16,9 @@ use core::marker::PhantomData;
 #[cfg(feature = "defmt")]
 use defmt;
 
-use embedded_graphics_core::pixelcolor::{Rgb565, raw::RawU16};
-use embedded_graphics_core::prelude::RawData;
+use embedded_graphics_core::pixelcolor::{raw::RawU16, Rgb565};
+use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, RawData, Size};
+use embedded_graphics_core::Pixel as EgPixel;
 use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::Error as SpiError; // Directly use async SpiBus
 
@@ -471,7 +472,11 @@ where
                 Ok(())
             }
         } else {
-            if cmd_res.is_err() { cmd_res } else { Ok(()) }
+            if cmd_res.is_err() {
+                cmd_res
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -483,14 +488,15 @@ where
     fn transform_coordinates(&self, x: u16, y: u16) -> (u16, u16) {
         match self.config.orientation {
             Orientation::Portrait => {
-                // Portrait mode needs 180° rotation to display correctly
-                // This compensates for the hardware orientation
-                (self.config.width - 1 - x, self.config.height - 1 - y)
+                // Apply 90°+180° rotation to match the working reference example
+                // For 160x40 logical -> 40x160 physical: logical(x,y) -> physical(39-y, 159-x)
+                // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
+                (39 - y, 159 - x)
             }
             Orientation::Landscape => {
-                // 90° rotation: logical(x,y) -> physical(y, width-1-x)
-                // For GC9D01: physical coordinates need adjustment for 40x160 display
-                (39 - y, 159 - x)
+                // 90° clockwise rotation: logical(x,y) -> physical(y, width-1-x)
+                // For 160x40 logical -> 40x160 physical: logical(x,y) -> physical(y, 159-x)
+                (y, 159 - x)
             }
             Orientation::PortraitSwapped => {
                 // This becomes the "normal" portrait (no rotation needed)
@@ -582,8 +588,9 @@ where
     pub fn set_pixel(&mut self, x: u16, y: u16, color: Rgb565) {
         if let Some(ref mut frame_buf) = self.frame_buffer {
             if x < self.config.width && y < self.config.height {
-                // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                // This matches the reference implementation in stm32g4-direct-spi-90-complex-patterns
+                // Apply coordinate transformation matching the working reference example
+                // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
                 let physical_x = 39 - y;
                 let physical_y = 159 - x;
 
@@ -603,7 +610,9 @@ where
             for row in y..(y + height) {
                 for col in x..(x + width) {
                     if col < self.config.width && row < self.config.height {
-                        // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        // Apply coordinate transformation matching the working reference example
+                        // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
                         let physical_x = 39 - row;
                         let physical_y = 159 - col;
 
@@ -629,7 +638,9 @@ where
                         && row < self.config.height
                         && data_index < data.len()
                     {
-                        // Apply coordinate transformation for 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        // Apply coordinate transformation matching the working reference example
+                        // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
+                        // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
                         let physical_x = 39 - row;
                         let physical_y = 159 - col;
 
@@ -653,9 +664,20 @@ where
             return Ok(());
         }
 
-        // Set address window for the entire screen
-        self.set_address_window(0, 0, self.config.width - 1, self.config.height - 1)
-            .await?;
+        // Set address window for the entire physical screen (40x160)
+        // Use physical coordinates directly, not logical coordinates
+        // ColumnAddressSet (0x2A) sets X coordinates (0 to 39 for physical width)
+        // RowAddressSet (0x2B) sets Y coordinates (0 to 159 for physical height)
+        self.write_command(
+            Instruction::ColumnAddressSet,
+            &[0, 0, 0, 39], // Physical X: 0 to 39
+        )
+        .await?;
+        self.write_command(
+            Instruction::RowAddressSet,
+            &[0, 0, 0, 159], // Physical Y: 0 to 159
+        )
+        .await?;
         self.write_command(Instruction::MemoryWrite, &[]).await?;
 
         // Start data transmission
@@ -714,5 +736,54 @@ where
         if let Some(_) = self.frame_buffer {
             self.write_rect(x, y, width, height, data);
         }
+    }
+}
+
+// Embedded Graphics trait implementations
+impl<'b, BUS, DC, RST, TIMER, BusE, PinE> OriginDimensions for GC9D01<'b, BUS, DC, RST, TIMER>
+where
+    BUS: SpiDevice<Error = BusE>,
+    DC: OutputPin<Error = PinE>,
+    RST: OutputPin<Error = PinE>,
+    TIMER: crate::Timer,
+    BusE: core::fmt::Debug + SpiError,
+    PinE: core::fmt::Debug,
+{
+    fn size(&self) -> Size {
+        Size::new(self.config.width as u32, self.config.height as u32)
+    }
+}
+
+impl<'b, BUS, DC, RST, TIMER, BusE, PinE> DrawTarget for GC9D01<'b, BUS, DC, RST, TIMER>
+where
+    BUS: SpiDevice<Error = BusE>,
+    DC: OutputPin<Error = PinE>,
+    RST: OutputPin<Error = PinE>,
+    TIMER: crate::Timer,
+    BusE: core::fmt::Debug + SpiError,
+    PinE: core::fmt::Debug,
+{
+    type Color = Rgb565;
+    type Error = core::convert::Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = EgPixel<Self::Color>>,
+    {
+        for EgPixel(point, color) in pixels {
+            if point.x >= 0 && point.y >= 0 {
+                let x = point.x as u16;
+                let y = point.y as u16;
+                if x < self.config.width && y < self.config.height {
+                    self.set_pixel(x, y, color);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.clear_frame_buffer(color);
+        Ok(())
     }
 }

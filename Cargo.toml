@@ -1,12 +1,16 @@
 [package]
 name = "gc9d01"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Ivan Li <ivanli2048@gmail.com>"]
-edition = "2024"
+edition = "2021"
 license = "MIT OR Apache-2.0"
-keywords = ["embedded", "embedded-hal-driver", "no-std", "gc9d01", "graphics"]
-description = "GC9D01 async driver based on embedded-hal"
+keywords = ["embedded", "embedded-hal", "no-std", "gc9d01", "display"]
+categories = ["embedded", "hardware-support", "no-std"]
+description = "A no_std async/sync driver for GC9D01 circular LCD displays with embedded-graphics support"
 repository = "https://github.com/IvanLi-CN/gc9d01-rs"
+documentation = "https://docs.rs/gc9d01"
+readme = "README.md"
+rust-version = "1.75"
 
 [dependencies]
 embedded-hal-async = { version = "1.0.0", optional = true }
