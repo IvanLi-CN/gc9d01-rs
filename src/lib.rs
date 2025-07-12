@@ -702,103 +702,17 @@ where
         }
     }
 
-    pub async fn fill_color(&mut self, color: Rgb565) -> Result<(), Error<BusE, PinE>> {
-        // If frame buffer is available, update it instead of directly writing to screen
-        if self.frame_buffer.is_some() {
+    pub fn fill_color(&mut self, color: Rgb565) {
+        // Only operate on frame buffer - no hardware operations
+        if let Some(_) = self.frame_buffer {
             self.clear_frame_buffer(color);
-            return Ok(());
-        }
-
-        // Legacy behavior: directly write to screen
-        // fill_color should always fill the entire physical screen area (0,0) to (width-1, height-1)
-        // set_address_window now handles the mapping to GRAM based on orientation and offsets
-        self.set_address_window(0, 0, self.config.width - 1, self.config.height - 1)
-            .await?;
-        self.write_command(Instruction::MemoryWrite, &[]).await?;
-
-        let internal_dc_res: Result<(), PinE> = self.start_data_internal();
-        let dc_res: Result<(), Error<BusE, PinE>> = internal_dc_res.map_err(Error::Pin);
-        if dc_res.is_err() {
-            return dc_res;
-        }
-
-        let color_val = RawU16::from(color).into_inner();
-        let high_byte = (color_val >> 8) as u8;
-        let low_byte = color_val as u8;
-
-        for chunk in self.buffer.chunks_mut(2) {
-            chunk[0] = high_byte;
-            chunk[1] = low_byte;
-        }
-
-        let total_pixels = self.config.width as usize * self.config.height as usize;
-        let mut pixels_sent = 0;
-        let mut first_bus_error: Option<BusE> = None;
-
-        while pixels_sent < total_pixels {
-            let remaining_pixels = total_pixels - pixels_sent;
-            let current_chunk_pixels = core::cmp::min(remaining_pixels, MAX_DATA_LEN);
-            let bytes_to_send = current_chunk_pixels * 2;
-            if let Err(e) = self.bus.write(&self.buffer[..bytes_to_send]).await {
-                first_bus_error = Some(e);
-                break;
-            }
-            pixels_sent += current_chunk_pixels;
-        }
-
-        if let Some(bus_err) = first_bus_error {
-            Err(Error::Bus(bus_err))
-        } else {
-            Ok(())
         }
     }
 
-    pub async fn write_area(
-        &mut self,
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-        data: &[Rgb565],
-    ) -> Result<(), Error<BusE, PinE>> {
-        // If frame buffer is available, update it instead of directly writing to screen
-        if self.frame_buffer.is_some() {
+    pub fn write_area(&mut self, x: u16, y: u16, width: u16, height: u16, data: &[Rgb565]) {
+        // Only operate on frame buffer - no hardware operations
+        if let Some(_) = self.frame_buffer {
             self.write_rect(x, y, width, height, data);
-            return Ok(());
-        }
-
-        // Legacy behavior: directly write to screen
-        self.set_address_window(x, y, x + width - 1, y + height - 1)
-            .await?;
-        self.write_command(Instruction::MemoryWrite, &[]).await?;
-
-        let internal_dc_res: Result<(), PinE> = self.start_data_internal();
-        let dc_res: Result<(), Error<BusE, PinE>> = internal_dc_res.map_err(Error::Pin);
-        if dc_res.is_err() {
-            return dc_res;
-        }
-
-        let mut current_pixel_index = 0;
-        let mut first_bus_error: Option<BusE> = None;
-        while current_pixel_index < data.len() {
-            let mut buffer_idx = 0;
-            while buffer_idx < self.buffer.len() && current_pixel_index < data.len() {
-                let color_val = RawU16::from(data[current_pixel_index]).into_inner();
-                self.buffer[buffer_idx] = (color_val >> 8) as u8;
-                self.buffer[buffer_idx + 1] = color_val as u8;
-                buffer_idx += 2;
-                current_pixel_index += 1;
-            }
-            if buffer_idx > 0 {
-                if let Err(e) = self.bus.write(&self.buffer[..buffer_idx]).await {
-                    first_bus_error = Some(e);
-                }
-            }
-        }
-        if let Some(bus_err) = first_bus_error {
-            Err(Error::Bus(bus_err))
-        } else {
-            Ok(())
         }
     }
 }

@@ -187,19 +187,19 @@ async fn main(_spawner: Spawner) {
 
         // Fill with red
         info!("Filling screen with RED...");
-        display.fill_color(RED).await.unwrap();
+        display.fill_color(RED);
         display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
         // Fill with green
         info!("Filling screen with GREEN...");
-        display.fill_color(GREEN).await.unwrap();
+        display.fill_color(GREEN);
         display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
         // Fill with blue
         info!("Filling screen with BLUE...");
-        display.fill_color(BLUE).await.unwrap();
+        display.fill_color(BLUE);
         display.flush().await.unwrap();
         embassy_time::Timer::after_secs(2).await;
 
@@ -395,5 +395,160 @@ async fn main(_spawner: Spawner) {
 
         info!("Rainbow gradient pattern completed");
         embassy_time::Timer::after_secs(5).await;
+
+        // Pattern 7: 20×20 Triangles Pattern
+        info!("Pattern 7: 20×20 Triangles Pattern (90°)");
+
+        // Clear frame buffer first
+        display.clear_frame_buffer(BLACK);
+
+        // Draw triangles in a grid pattern for 160×40 logical screen
+        // Each triangle is 20×20 pixels, so we can fit 8×2 triangles
+        let triangle_size = 20;
+        let triangles_x = LOGICAL_WIDTH / triangle_size;  // 8 triangles across
+        let triangles_y = LOGICAL_HEIGHT / triangle_size; // 2 triangles down
+
+        for row in 0..triangles_y {
+            for col in 0..triangles_x {
+                let color = colors[(row * triangles_x + col) % colors.len()];
+                let base_x = col * triangle_size;
+                let base_y = row * triangle_size;
+
+                // Draw all triangles pointing upward
+                draw_triangle_up(&mut display, base_x, base_y, triangle_size, color);
+            }
+        }
+
+        // Flush the frame buffer to display
+        display.flush().await.unwrap();
+
+        info!("20×20 triangles pattern completed");
+        embassy_time::Timer::after_secs(5).await;
+    }
+}
+
+// Helper functions to draw triangles in different orientations
+fn draw_triangle_up<SPI, DC, RST, TIMER, BusE, PinE>(
+    display: &mut GC9D01<SPI, DC, RST, TIMER>,
+    base_x: usize,
+    base_y: usize,
+    size: usize,
+    color: Rgb565,
+) where
+    SPI: embedded_hal_async::spi::SpiDevice<Error = BusE>,
+    DC: embedded_hal::digital::OutputPin<Error = PinE>,
+    RST: embedded_hal::digital::OutputPin<Error = PinE>,
+    TIMER: Gc9d01Timer,
+    BusE: core::fmt::Debug + embedded_hal::spi::Error,
+    PinE: core::fmt::Debug,
+{
+    // Draw upward pointing isosceles triangle
+    // Bottom edge is horizontal with length = size (20 pixels)
+    // Triangle height = size (20 pixels)
+    // y=0 is at the top (apex), y=size-1 is at the bottom (base)
+
+    for y in 0..size {
+        // Calculate width at this height level
+        // At y=0 (top): width = 1 pixel
+        // At y=size-1 (bottom): width = size pixels
+        let width = if y == 0 {
+            1
+        } else {
+            (y * size) / (size - 1)
+        };
+
+        // Center the line horizontally within the size x size area
+        let start_x = base_x + (size - width) / 2;
+        let end_x = start_x + width;
+
+        for x in start_x..end_x.min(base_x + size) {
+            if x < LOGICAL_WIDTH && (base_y + y) < LOGICAL_HEIGHT {
+                display.set_pixel(x as u16, (base_y + y) as u16, color);
+            }
+        }
+    }
+}
+
+fn draw_triangle_down<SPI, DC, RST, TIMER, BusE, PinE>(
+    display: &mut GC9D01<SPI, DC, RST, TIMER>,
+    base_x: usize,
+    base_y: usize,
+    size: usize,
+    color: Rgb565,
+) where
+    SPI: embedded_hal_async::spi::SpiDevice<Error = BusE>,
+    DC: embedded_hal::digital::OutputPin<Error = PinE>,
+    RST: embedded_hal::digital::OutputPin<Error = PinE>,
+    TIMER: Gc9d01Timer,
+    BusE: core::fmt::Debug + embedded_hal::spi::Error,
+    PinE: core::fmt::Debug,
+{
+    // Draw downward pointing triangle
+    for y in 0..size {
+        let width = ((size - y - 1) * 2) + 1;
+        let start_x = base_x + y;
+        let end_x = start_x + width;
+
+        for x in start_x..end_x.min(base_x + size) {
+            if x < LOGICAL_WIDTH && (base_y + y) < LOGICAL_HEIGHT {
+                display.set_pixel(x as u16, (base_y + y) as u16, color);
+            }
+        }
+    }
+}
+
+fn draw_triangle_left<SPI, DC, RST, TIMER, BusE, PinE>(
+    display: &mut GC9D01<SPI, DC, RST, TIMER>,
+    base_x: usize,
+    base_y: usize,
+    size: usize,
+    color: Rgb565,
+) where
+    SPI: embedded_hal_async::spi::SpiDevice<Error = BusE>,
+    DC: embedded_hal::digital::OutputPin<Error = PinE>,
+    RST: embedded_hal::digital::OutputPin<Error = PinE>,
+    TIMER: Gc9d01Timer,
+    BusE: core::fmt::Debug + embedded_hal::spi::Error,
+    PinE: core::fmt::Debug,
+{
+    // Draw left pointing triangle
+    for x in 0..size {
+        let height = (x * 2) + 1;
+        let start_y = base_y + (size - x - 1);
+        let end_y = start_y + height;
+
+        for y in start_y..end_y.min(base_y + size) {
+            if (base_x + x) < LOGICAL_WIDTH && y < LOGICAL_HEIGHT {
+                display.set_pixel((base_x + x) as u16, y as u16, color);
+            }
+        }
+    }
+}
+
+fn draw_triangle_right<SPI, DC, RST, TIMER, BusE, PinE>(
+    display: &mut GC9D01<SPI, DC, RST, TIMER>,
+    base_x: usize,
+    base_y: usize,
+    size: usize,
+    color: Rgb565,
+) where
+    SPI: embedded_hal_async::spi::SpiDevice<Error = BusE>,
+    DC: embedded_hal::digital::OutputPin<Error = PinE>,
+    RST: embedded_hal::digital::OutputPin<Error = PinE>,
+    TIMER: Gc9d01Timer,
+    BusE: core::fmt::Debug + embedded_hal::spi::Error,
+    PinE: core::fmt::Debug,
+{
+    // Draw right pointing triangle
+    for x in 0..size {
+        let height = ((size - x - 1) * 2) + 1;
+        let start_y = base_y + x;
+        let end_y = start_y + height;
+
+        for y in start_y..end_y.min(base_y + size) {
+            if (base_x + x) < LOGICAL_WIDTH && y < LOGICAL_HEIGHT {
+                display.set_pixel((base_x + x) as u16, y as u16, color);
+            }
+        }
     }
 }

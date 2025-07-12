@@ -128,7 +128,7 @@ async fn main(_spawner: Spawner) {
 
     loop {
         // Clear screen first
-        display.fill_color(Rgb565::CSS_BLACK).await.unwrap();
+        display.fill_color(Rgb565::CSS_BLACK);
         embassy_time::Timer::after_millis(500).await;
 
         info!("Drawing two-row test pattern: colors on top, grayscale on bottom.");
@@ -177,9 +177,7 @@ async fn main(_spawner: Spawner) {
 
             // Write the pixel data for the current stripe
             display
-                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels)
-                .await
-                .unwrap();
+                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels);
         }
 
         // Draw second row - grayscale stripes
@@ -195,10 +193,11 @@ async fn main(_spawner: Spawner) {
 
             // Write the pixel data for the current stripe
             display
-                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels)
-                .await
-                .unwrap();
+                .write_area(x, y, STRIPE_WIDTH, ROW_HEIGHT, &stripe_pixels);
         }
+
+        // Flush all changes to the display
+        display.flush().await.unwrap();
 
         info!("Two-row pattern completed. Colors: top row, Grayscale: bottom row");
         embassy_time::Timer::after_secs(3).await;
