@@ -709,7 +709,7 @@ where
 }
 
 // Embedded Graphics trait implementations
-impl<'b, BUS, DC, RST, TIMER, BusE, PinE> OriginDimensions for GC9D01<'b, BUS, DC, RST, TIMER>
+impl<BUS, DC, RST, TIMER, BusE, PinE> OriginDimensions for GC9D01<'_, BUS, DC, RST, TIMER>
 where
     BUS: SpiDevice<Error = BusE>,
     DC: OutputPin<Error = PinE>,
@@ -723,7 +723,7 @@ where
     }
 }
 
-impl<'b, BUS, DC, RST, TIMER, BusE, PinE> DrawTarget for GC9D01<'b, BUS, DC, RST, TIMER>
+impl<BUS, DC, RST, TIMER, BusE, PinE> DrawTarget for GC9D01<'_, BUS, DC, RST, TIMER>
 where
     BUS: SpiDevice<Error = BusE>,
     DC: OutputPin<Error = PinE>,
