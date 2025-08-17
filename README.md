@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/gc9d01/badge.svg)](https://docs.rs/gc9d01)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/IvanLi-CN/gc9d01-rs)
 
-A `no_std` Rust driver for the **GC9D01** circular LCD display controller with full **embedded-graphics** support. This driver provides both async and sync APIs, making it suitable for modern embedded frameworks like Embassy as well as traditional blocking applications.
+A `no_std` Rust driver for the **GC9D01** LCD display controller with full **embedded-graphics** support. This driver provides both async and sync APIs, making it suitable for modern embedded frameworks like Embassy as well as traditional blocking applications.
 
 ## ✨ Features
 
@@ -15,7 +15,7 @@ A `no_std` Rust driver for the **GC9D01** circular LCD display controller with f
 - 🌈 **RGB565 color format** - 16-bit color depth with efficient memory usage
 - 🔧 **Hardware abstraction** - Works with any embedded-hal SPI implementation
 - 📐 **Multiple orientations** - Portrait, Landscape, and rotated variants with coordinate transformation
-- 🎪 **Circular display optimized** - Designed specifically for round LCD panels
+- 🎪 **Display optimized** - Designed for GC9D01-based LCD panels
 - 📦 **no_std compatible** - Perfect for resource-constrained embedded systems
 
 ## 🚀 Quick Start
