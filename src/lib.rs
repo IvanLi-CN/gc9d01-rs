@@ -14,10 +14,10 @@
 // Assuming "async" feature is always on for this simplified test
 use core::marker::PhantomData;
 
-use embedded_graphics_core::pixelcolor::raw::RawData;
-use embedded_graphics_core::pixelcolor::Rgb565;
-use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, Size};
 use embedded_graphics_core::Pixel as EgPixel;
+use embedded_graphics_core::pixelcolor::Rgb565;
+use embedded_graphics_core::pixelcolor::raw::RawData;
+use embedded_graphics_core::prelude::{DrawTarget, OriginDimensions, Size};
 use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::Error as SpiError; // Directly use async SpiBus
 
@@ -34,7 +34,7 @@ use embedded_hal_async::spi::SpiDevice;
 )]
 pub trait Timer {
     /// Expire after the specified number of milliseconds.
-    fn after_millis(milliseconds: u64) -> impl core::future::Future<Output = ()>;
+    fn after_millis(milliseconds: u64) -> impl Future<Output = ()>;
 }
 
 // Frame buffer size for full-screen rendering (160x40x2 bytes)

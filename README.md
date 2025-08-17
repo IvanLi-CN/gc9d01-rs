@@ -196,6 +196,14 @@ let mut display = GC9D01::new(
 gc9d01 = { version = "0.1", features = ["async", "defmt"] }
 ```
 
+## 🦀 Rust Version Requirements
+
+This crate requires **Rust 1.85** or later and uses the **2024 edition**. This enables:
+
+- Enhanced async/await support with improved Future handling
+- Better error diagnostics and compiler messages
+- Optimized code generation for embedded targets
+
 ## 📚 Documentation
 
 - 📖 [API Documentation](https://docs.rs/gc9d01)
