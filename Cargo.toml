@@ -2,7 +2,7 @@
 name = "gc9d01"
 version = "0.0.1"
 authors = ["Ivan Li <ivanli2048@gmail.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 keywords = ["embedded", "embedded-hal", "no-std", "gc9d01", "display"]
 categories = ["embedded", "hardware-support", "no-std"]
@@ -10,7 +10,7 @@ description = "A no_std async/sync driver for GC9D01 LCD displays with embedded-
 repository = "https://github.com/IvanLi-CN/gc9d01-rs"
 documentation = "https://docs.rs/gc9d01"
 readme = "README.md"
-rust-version = "1.75"
+rust-version = "1.85"
 exclude = [
     "docs",
     "target/",
