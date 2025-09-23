@@ -38,7 +38,7 @@ pub trait Timer {
 }
 
 // Frame buffer size for full-screen rendering (160x40x2 bytes)
-pub const FRAME_BUF_SIZE: usize = 160 * 40 * 2;
+pub const FRAME_BUF_SIZE: usize = 160 * 50 * 2;
 pub const MAX_FRAME_PIXELS: usize = FRAME_BUF_SIZE / 2;
 
 #[derive(Debug, Clone, Copy)]
@@ -477,27 +477,23 @@ where
 
     /// Transform logical coordinates to physical coordinates based on orientation
     fn transform_coordinates(&self, x: u16, y: u16) -> (u16, u16) {
+        let (phys_w, phys_h) = self.physical_dimensions();
         match self.config.orientation {
-            Orientation::Portrait => {
-                // Apply 90°+180° rotation to match the working reference example
-                // For 160x40 logical -> 40x160 physical: logical(x,y) -> physical(39-y, 159-x)
-                // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                (39 - y, 159 - x)
-            }
-            Orientation::Landscape => {
-                // 90° clockwise rotation: logical(x,y) -> physical(y, width-1-x)
-                // For 160x40 logical -> 40x160 physical: logical(x,y) -> physical(y, 159-x)
-                (y, 159 - x)
-            }
-            Orientation::PortraitSwapped => {
-                // This becomes the "normal" portrait (no rotation needed)
-                (x, y)
-            }
-            Orientation::LandscapeSwapped => {
-                // 270° rotation
-                (y, self.config.width - 1 - x)
-            }
+            Orientation::Portrait => (phys_w - 1 - y, phys_h - 1 - x),
+            Orientation::Landscape => (y, phys_h - 1 - x),
+            Orientation::PortraitSwapped => (x, y),
+            Orientation::LandscapeSwapped => (y, phys_h - 1 - x),
         }
+    }
+
+    /// Physical (column x row) dimensions used for address window and buffer layout.
+    ///
+    /// For this panel and initialization (MADCTL = 0x40 without MV), the column
+    /// address spans the logical width and the row address spans the logical height.
+    /// So we keep (width, height) regardless of orientation and do rotation in
+    /// coordinate transform only.
+    fn physical_dimensions(&self) -> (u16, u16) {
+        (self.config.width, self.config.height)
     }
 
     pub async fn set_address_window(
@@ -578,18 +574,10 @@ where
     /// Set a pixel in the frame buffer
     pub fn set_pixel(&mut self, x: u16, y: u16, color: Rgb565) {
         if x < self.config.width && y < self.config.height {
-            // Convert color to correct byte order for GC9D01 display
             let converted_color = Self::convert_color_byte_order(color);
-
-            // Apply coordinate transformation matching the working reference example
-            // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-            // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-            let physical_x = 39 - y;
-            let physical_y = 159 - x;
-
-            // Calculate index in frame buffer using physical coordinates
-            // Frame buffer is organized as physical screen: 40 width × 160 height
-            let index = (physical_y as usize) * 40 + (physical_x as usize);
+            let (px, py) = self.transform_coordinates(x, y);
+            let (phys_w, _phys_h) = self.physical_dimensions();
+            let index = (py as usize) * (phys_w as usize) + (px as usize);
             if index < self.frame_buffer.len() {
                 self.frame_buffer[index] = converted_color;
             }
@@ -604,15 +592,9 @@ where
         for row in y..(y + height) {
             for col in x..(x + width) {
                 if col < self.config.width && row < self.config.height {
-                    // Apply coordinate transformation matching the working reference example
-                    // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                    // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                    let physical_x = 39 - row;
-                    let physical_y = 159 - col;
-
-                    // Calculate index in frame buffer using physical coordinates
-                    // Frame buffer is organized as physical screen: 40 width × 160 height
-                    let index = (physical_y as usize) * 40 + (physical_x as usize);
+                    let (px, py) = self.transform_coordinates(col, row);
+                    let (phys_w, _phys_h) = self.physical_dimensions();
+                    let index = (py as usize) * (phys_w as usize) + (px as usize);
                     if index < self.frame_buffer.len() {
                         self.frame_buffer[index] = converted_color;
                     }
@@ -627,18 +609,10 @@ where
         for row in y..(y + height) {
             for col in x..(x + width) {
                 if col < self.config.width && row < self.config.height && data_index < data.len() {
-                    // Convert color to correct byte order for GC9D01 display
                     let converted_color = Self::convert_color_byte_order(data[data_index]);
-
-                    // Apply coordinate transformation matching the working reference example
-                    // For 90°+180° rotation: logical(x,y) -> physical(39-y, 159-x)
-                    // This matches the coordinate transformation in stm32g4-direct-spi-90-complex-patterns
-                    let physical_x = 39 - row;
-                    let physical_y = 159 - col;
-
-                    // Calculate index in frame buffer using physical coordinates
-                    // Frame buffer is organized as physical screen: 40 width × 160 height
-                    let index = (physical_y as usize) * 40 + (physical_x as usize);
+                    let (px, py) = self.transform_coordinates(col, row);
+                    let (phys_w, _phys_h) = self.physical_dimensions();
+                    let index = (py as usize) * (phys_w as usize) + (px as usize);
                     if index < self.frame_buffer.len() {
                         self.frame_buffer[index] = converted_color;
                     }
@@ -650,18 +624,16 @@ where
 
     /// Flush the frame buffer to the display
     pub async fn flush(&mut self) -> Result<(), Error<BusE, PinE>> {
-        // Set address window for the entire physical screen (40x160)
-        // Use physical coordinates directly, not logical coordinates
-        // ColumnAddressSet (0x2A) sets X coordinates (0 to 39 for physical width)
-        // RowAddressSet (0x2B) sets Y coordinates (0 to 159 for physical height)
+        // Set address window for the entire physical screen
+        let (phys_w, phys_h) = self.physical_dimensions();
         self.write_command(
             Instruction::ColumnAddressSet,
-            &[0, 0, 0, 39], // Physical X: 0 to 39
+            &[0, 0, ((phys_w - 1) >> 8) as u8, ((phys_w - 1) & 0xFF) as u8],
         )
         .await?;
         self.write_command(
             Instruction::RowAddressSet,
-            &[0, 0, 0, 159], // Physical Y: 0 to 159
+            &[0, 0, ((phys_h - 1) >> 8) as u8, ((phys_h - 1) & 0xFF) as u8],
         )
         .await?;
         self.write_command(Instruction::MemoryWrite, &[]).await?;
