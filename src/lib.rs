@@ -37,9 +37,20 @@ pub trait Timer {
     fn after_millis(milliseconds: u64) -> impl Future<Output = ()>;
 }
 
-// Frame buffer size for full-screen rendering (160x40x2 bytes)
-pub const FRAME_BUF_SIZE: usize = 160 * 50 * 2;
-pub const MAX_FRAME_PIXELS: usize = FRAME_BUF_SIZE / 2;
+// Back-compat framebuffer constants (deprecated).
+// These were previously exported and some downstream code may still depend on them
+// for sizing buffers. Keep them exported to avoid a breaking change while
+// providing better alternatives on `Config` below.
+#[deprecated(
+    since = "0.0.2",
+    note = "Use Config::frame_bytes() or Config::frame_pixels() instead; this constant will be removed in a future release."
+)]
+pub const FRAME_BUF_SIZE: usize = 160 * 50 * 2; // bytes
+#[deprecated(
+    since = "0.0.2",
+    note = "Use Config::frame_pixels() instead; this constant will be removed in a future release."
+)]
+pub const MAX_FRAME_PIXELS: usize = 160 * 50; // pixels
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -188,6 +199,18 @@ impl Default for Config {
             dx: 0,
             dy: 0,
         }
+    }
+}
+
+impl Config {
+    /// Total pixels of the frame (width * height).
+    pub const fn frame_pixels(&self) -> usize {
+        (self.width as usize) * (self.height as usize)
+    }
+
+    /// Total bytes of the frame buffer for RGB565 (2 bytes per pixel).
+    pub const fn frame_bytes(&self) -> usize {
+        self.frame_pixels() * 2
     }
 }
 

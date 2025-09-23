@@ -111,9 +111,6 @@ async fn main(_spawner: Spawner) {
         dy: 0,
     };
 
-    static DISPLAY_BUFFER_CELL: StaticCell<[u8; gc9d01::BUF_SIZE]> = StaticCell::new();
-    let buffer_slice: &mut [u8] = DISPLAY_BUFFER_CELL.init([0; gc9d01::BUF_SIZE]);
-
     // Create frame buffer for embedded-graphics
     static FRAME_BUFFER_CELL: StaticCell<[Rgb565; SCREEN_PIXELS]> = StaticCell::new();
     let frame_buffer: &mut [Rgb565] = FRAME_BUFFER_CELL.init([Rgb565::BLACK; SCREEN_PIXELS]);
@@ -129,7 +126,7 @@ async fn main(_spawner: Spawner) {
         Output<'_>,
         Output<'_>,
         EmbassyDisplayTimer,
-    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, buffer_slice, frame_buffer);
+    > = GC9D01::new(display_config, spi_device, dc_pin, rst_pin, frame_buffer);
 
     info!("Initializing display...");
     match display.init().await {
