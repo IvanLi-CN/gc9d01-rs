@@ -47,3 +47,7 @@ overflow-checks = false
 [features]
 async = ["dep:embedded-hal-async"]
 defmt = ["dep:defmt"] # Added defmt feature
+## Panel/profile features
+## Default (no extra feature) targets 160x40-style init (reference-style sequence)
+## Enable this feature for 160x50 narrow module with column offset and alternate init values
+panel_160x50 = []

@@ -1,0 +1,45 @@
+[package]
+name = "esp32s3-160-50-embedded-graphics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+defmt = "1"
+
+embassy-executor = "0.7.0"
+embassy-time = "0.4.0"
+embassy-sync = "0.6.1" # may be unused after simplification
+embassy-embedded-hal = "0.4.0"
+
+esp-backtrace = { version = "0.17.0", features = ["esp32s3", "panic-handler", "println"] }
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
+esp-hal-embassy = { version = "0.9.0", features = ["esp32s3"] }
+esp-println = { version = "0.15.0", features = ["esp32s3", "defmt-espflash"] }
+esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
+
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-graphics = "0.8.1"
+static_cell = "2.0.0"
+
+gc9d01 = { path = "../../", features = ["async", "defmt", "panel_160x50"] }
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 3
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = 0
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false
+
+[package.metadata.espflash]
+partition_table = "partitions.csv"
