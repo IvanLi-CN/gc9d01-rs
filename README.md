@@ -76,19 +76,19 @@ This repository includes comprehensive examples for different use cases:
 
 #### Direct SPI Implementation
 
-- **Location**: `examples/stm32g4-direct-spi-90-complex-patterns/`
+- **Location**: `examples/stm32g4-160-40-direct-spi-90-complex-patterns/`
 - **Features**: Raw SPI operations, complex pattern rendering, coordinate transformation
 - **Performance**: Optimized for maximum speed with chunked rendering
 
 #### embedded-graphics Integration
 
-- **Location**: `examples/stm32g4-embedded-graphics/`
+- **Location**: `examples/stm32g4-160-40-embedded-graphics/`
 - **Features**: Full embedded-graphics support, shapes, text, patterns
 - **Use case**: Rich graphics applications with high-level drawing APIs
 
 #### Basic Display Test
 
-- **Location**: `examples/stm32g4/`
+- **Location**: `examples/stm32g4-160-40/`
 - **Features**: Simple color cycling, basic functionality verification
 - **Use case**: Hardware testing and driver validation
 
@@ -108,15 +108,15 @@ All examples use this pin configuration:
 
 ```bash
 # Basic functionality test
-cd examples/stm32g4
+cd examples/stm32g4-160-40
 cargo run
 
 # embedded-graphics demo
-cd examples/stm32g4-embedded-graphics
+cd examples/stm32g4-160-40-embedded-graphics
 cargo run
 
 # High-performance patterns
-cd examples/stm32g4-direct-spi-90-complex-patterns
+cd examples/stm32g4-160-40-direct-spi-90-complex-patterns
 cargo run
 ```
 

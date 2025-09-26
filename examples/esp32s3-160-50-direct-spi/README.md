@@ -1,9 +1,9 @@
 # ESP32-S3 直驱 SPI 示例（GC9D01）
 
-本示例展示如何在 ESP32‑S3 上“直接”通过 SPI 驱动 GC9D01 液晶面板，不依赖 `display-interface` 或封装驱动，便于调试底层命令与波形。示例移植自本仓库 `examples/stm32g4-direct-spi` 的初始化与渲染逻辑，并采用参考固件项目 `iso-usb-hub_v2` 中相同的引脚分配。
+本示例展示如何在 ESP32‑S3 上“直接”通过 SPI 驱动 GC9D01 液晶面板，不依赖 `display-interface` 或封装驱动，便于调试底层命令与波形。示例移植自本仓库 `examples/stm32g4-160-40-direct-spi` 的初始化与渲染逻辑，并采用参考固件项目 `iso-usb-hub_v2` 中相同的引脚分配。
 
-- 位置：`examples/esp32s3-direct-spi/`
-- 逻辑分辨率：160 × 40（示例只在面板 360×360 GRAM 的一块区域渲染）
+- 位置：`examples/esp32s3-160-50-direct-spi/`
+- 逻辑分辨率：160 × 50（示例只在面板 360×360 GRAM 的一块区域渲染）
 - SPI：SPI2，Mode0，默认 10 MHz
 
 ## 硬件连接（与 iso-usb-hub_v2 一致）
@@ -45,7 +45,7 @@ cargo install espflash
 快速运行：
 
 ```bash
-cd examples/esp32s3-direct-spi
+cd examples/esp32s3-160-50-direct-spi
 cargo run --release
 ```
 
@@ -67,10 +67,10 @@ cargo build --release
 
 ## 代码结构与可调项
 
-- 主程序：`examples/esp32s3-direct-spi/src/main.rs`
+- 主程序：`examples/esp32s3-160-50-direct-spi/src/main.rs`
   - SPI 配置（频率/模式/管脚）：在创建 `Spi::new(...).with_sck(GPIO12).with_mosi(GPIO11)` 处，默认 `10_000_000` Hz 与 `Mode0`。
   - 引脚：`CS=GPIO13`、`DC=GPIO10`、`RST=GPIO14`、`BLK=GPIO15`（上电即点亮背光）。
-  - 初始化序列：与 `stm32g4-direct-spi` 保持一致，便于对照。
+  - 初始化序列：与 `stm32g4-160-40-direct-spi` 保持一致，便于对照。
   - 批量填充：`fill_area_with_color` 使用 512 字节批发送（256 像素/批）。
   - 逻辑分辨率：示例固定渲染 160×40；若要修改，可在渲染循环中调整坐标或块大小（例如把每块由 20×20 改为其它尺寸）。
 
@@ -84,5 +84,5 @@ cargo build --release
 
 - 许可：继承仓库（MIT/Apache‑2.0）。
 - 致谢：
-  - 初始化与直驱思路来自 `examples/stm32g4-direct-spi`；
+  - 初始化与直驱思路来自 `examples/stm32g4-160-40-direct-spi`；
   - 引脚分配参考 `/Users/ivan/Projects/Ivan/iso-usb-hub_v2/src/main.rs` 注释与实现。

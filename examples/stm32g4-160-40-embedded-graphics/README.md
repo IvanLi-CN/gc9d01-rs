@@ -31,7 +31,7 @@ This example demonstrates how to use the GC9D01 driver with the embedded-graphic
 ## Building and Running
 
 ```bash
-cd examples/stm32g4-embedded-graphics
+cd examples/stm32g4-160-40-embedded-graphics
 cargo clean
 cargo run
 ```

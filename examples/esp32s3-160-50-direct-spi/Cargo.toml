@@ -1,5 +1,5 @@
 [package]
-name = "esp32s3-direct-spi"
+name = "esp32s3-160-50-direct-spi"
 version = "0.1.0"
 edition = "2021"
 
@@ -33,5 +33,5 @@ opt-level = 3
 overflow-checks = false
 
 [[bin]]
-name = "esp32s3-direct-spi"
+name = "esp32s3-160-50-direct-spi"
 path = "src/main.rs"
