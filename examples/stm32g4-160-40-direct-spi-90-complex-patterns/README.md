@@ -57,7 +57,7 @@
 ## 构建和运行
 
 ```bash
-cd examples/stm32g4-direct-spi-90-complex-patterns
+cd examples/stm32g4-160-40-direct-spi-90-complex-patterns
 cargo clean
 cargo run
 ```

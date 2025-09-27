@@ -61,10 +61,10 @@ jobs:
     strategy:
       matrix:
         example:
-          - "stm32g4"
-          - "stm32g4-90-complex-patterns"
-          - "stm32g4-direct-spi"
-          - "stm32g4-direct-spi-90-complex-patterns"
+          - "stm32g4-160-40"
+          - "stm32g4-160-40-90-complex-patterns"
+          - "stm32g4-160-40-direct-spi"
+          - "stm32g4-160-40-direct-spi-90-complex-patterns"
 
     steps:
     - uses: actions/checkout@v4

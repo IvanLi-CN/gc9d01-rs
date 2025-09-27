@@ -51,7 +51,7 @@ This example demonstrates complex pattern rendering on a GC9D01 display using th
 ## Building and Running
 
 ```bash
-cd examples/stm32g4-90-complex-patterns
+cd examples/stm32g4-160-40-90-complex-patterns
 cargo run
 ```
 

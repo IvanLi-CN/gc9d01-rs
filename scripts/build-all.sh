@@ -147,10 +147,10 @@ print_status "=== Building example projects ==="
 
 # List of example projects
 EXAMPLES=(
-    "examples/stm32g4"
-    "examples/stm32g4-90-complex-patterns"
-    "examples/stm32g4-direct-spi"
-    "examples/stm32g4-direct-spi-90-complex-patterns"
+    "examples/stm32g4-160-40"
+    "examples/stm32g4-160-40-90-complex-patterns"
+    "examples/stm32g4-160-40-direct-spi"
+    "examples/stm32g4-160-40-direct-spi-90-complex-patterns"
 )
 
 for example in "${EXAMPLES[@]}"; do

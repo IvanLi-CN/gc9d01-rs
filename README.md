@@ -18,6 +18,13 @@ A `no_std` Rust driver for the **GC9D01** LCD display controller with full **emb
 - 🎪 **Display optimized** - Designed for GC9D01-based LCD panels
 - 📦 **no_std compatible** - Perfect for resource-constrained embedded systems
 
+### Panel profiles
+
+- `panel_160x50` — Enables an alternative initialization sequence and addressing model tailored for narrow modules with a 160×50 visible region (physical GRAM window 50×160 with a column offset). When this feature is on:
+  - MADCTL = 0x00; column window (2A) = 0x000F..0x0040, row window (2B) = 0x0000..0x009F
+  - Use `Config { width: 160, height: 50, orientation: Landscape, dx: 15, dy: 0, .. }`
+  - Init sequence (GIP/porch/frame-rate/VREG/Gamma/SOU) matches the vendor direct‑SPI script used in our ESP32‑S3 example
+
 ## 🚀 Quick Start
 
 Add this to your `Cargo.toml`:
@@ -42,15 +49,8 @@ use embedded_graphics::{
 };
 
 // Create display configuration
-let config = Config {
-    width: 160,
-    height: 40,
-    orientation: Orientation::Portrait,
-    rgb: false,
-    inverted: false,
-    dx: 0,
-    dy: 0,
-};
+// Default profile (160×40 logical)
+let config = Config { width: 160, height: 40, orientation: Orientation::Portrait, rgb: false, inverted: false, dx: 0, dy: 0 };
 
 // Initialize display (async example)
 let mut display = GC9D01::new(
@@ -72,27 +72,45 @@ display.flush().await?;
 
 This repository includes comprehensive examples for different use cases:
 
+### 🟦 ESP32‑S3 Examples
+
+These target a 160×50 visible region module; the init is identical between direct‑SPI and embedded‑graphics examples.
+
+#### Direct SPI
+
+- Location: `examples/esp32s3-160-50-direct-spi/`
+- Pinout: SCK=GPIO12, MOSI=GPIO11, CS=GPIO13, DC=GPIO10, RST=GPIO14, BLK=GPIO15
+- Runner: `espflash flash --monitor`
+
+#### embedded‑graphics
+
+- Location: `examples/esp32s3-160-50-embedded-graphics/`
+- Feature: `panel_160x50` (enabled in the example)
+- Contains rich demos (fills, checkerboards, shapes, lines, text, grid) using square cells
+
+> Note: both examples include `esp_bootloader_esp_idf::esp_app_desc!()` so they can be flashed via `espflash`.
+
 ### 🎮 STM32G4 Examples
 
 #### Direct SPI Implementation
 
-- **Location**: `examples/stm32g4-direct-spi-90-complex-patterns/`
+- **Location**: `examples/stm32g4-160-40-direct-spi-90-complex-patterns/`
 - **Features**: Raw SPI operations, complex pattern rendering, coordinate transformation
 - **Performance**: Optimized for maximum speed with chunked rendering
 
 #### embedded-graphics Integration
 
-- **Location**: `examples/stm32g4-embedded-graphics/`
+- **Location**: `examples/stm32g4-160-40-embedded-graphics/`
 - **Features**: Full embedded-graphics support, shapes, text, patterns
 - **Use case**: Rich graphics applications with high-level drawing APIs
 
 #### Basic Display Test
 
-- **Location**: `examples/stm32g4/`
+- **Location**: `examples/stm32g4-160-40/`
 - **Features**: Simple color cycling, basic functionality verification
 - **Use case**: Hardware testing and driver validation
 
-### 🔧 Hardware Configuration
+### 🔧 Hardware Configuration (STM32G4)
 
 All examples use this pin configuration:
 
@@ -108,15 +126,15 @@ All examples use this pin configuration:
 
 ```bash
 # Basic functionality test
-cd examples/stm32g4
+cd examples/stm32g4-160-40
 cargo run
 
 # embedded-graphics demo
-cd examples/stm32g4-embedded-graphics
+cd examples/stm32g4-160-40-embedded-graphics
 cargo run
 
 # High-performance patterns
-cd examples/stm32g4-direct-spi-90-complex-patterns
+cd examples/stm32g4-160-40-direct-spi-90-complex-patterns
 cargo run
 ```
 
@@ -173,15 +191,10 @@ let config = Config {
 For maximum performance, use the frame buffer architecture:
 
 ```rust
-// Allocate buffers
-static DISPLAY_BUFFER: [u8; gc9d01::BUF_SIZE] = [0; gc9d01::BUF_SIZE];
-static FRAME_BUFFER: [Rgb565; 6400] = [Rgb565::BLACK; 6400]; // 160x40
-
-// Create display with frame buffer
-let mut display = GC9D01::new(
-    config, spi_device, dc_pin, rst_pin,
-    &mut DISPLAY_BUFFER, &mut FRAME_BUFFER
-);
+// Example: allocate a frame buffer for 160×40 (default profile)
+static mut FRAME_BUFFER: [Rgb565; 160 * 40] = [Rgb565::BLACK; 160 * 40];
+let fb: &mut [Rgb565] = unsafe { &mut FRAME_BUFFER };
+let mut display = GC9D01::new(config, spi_device, dc_pin, rst_pin, fb);
 ```
 
 ## 🔧 Features
@@ -190,10 +203,21 @@ let mut display = GC9D01::new(
 
 - `async` - Enable async/await support (requires `embedded-hal-async`)
 - `defmt` - Enable defmt logging support
+ - `panel_160x50` - Initialization + addressing for 160×50 visible region modules
 
 ```toml
 [dependencies]
-gc9d01 = { version = "0.1", features = ["async", "defmt"] }
+gc9d01 = { version = "0.1", features = ["async", "defmt", "panel_160x50"] }
+
+// Typical config for the panel_160x50 profile:
+// Config { width: 160, height: 50, orientation: Landscape, dx: 15, dy: 0, .. }
+
+// For direct parity with the vendor script, ensure MADCTL=0x00 is applied by init (handled by the feature).
+
+### Breaking change notice
+
+- Default `Config` now targets 160×40 logical rendering.
+- Legacy constants like `FRAME_BUF_SIZE`/`MAX_FRAME_PIXELS` have been aligned accordingly. Prefer using `Config::frame_bytes()` and `Config::frame_pixels()` to avoid breakage when switching profiles.
 ```
 
 ## 🦀 Rust Version Requirements

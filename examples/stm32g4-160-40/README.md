@@ -28,16 +28,16 @@ To run this example, ensure you have the necessary Rust toolchain and `embassy-s
     cargo build --target thumbv7em-none-eabihf # Adjust target if necessary
     ```
 
-    (Note: The example name for `cargo build --example <name>` is derived from the `[[bin]] name` in `Cargo.toml`, which is `gc9d01_stm32g4_example`. If this example is part of a workspace and defined in the root `Cargo.toml`'s `[workspace.members]` or `[workspace.default-members]`, you might use `cargo build --example gc9d01_stm32g4_example`. For a standalone example not in a workspace manifest, building the binary directly is common.)
+    (Note: The example name for `cargo build --example <name>` is derived from the `[[bin]] name` in `Cargo.toml`, which is `stm32g4-160-40`. If this example is part of a workspace and defined in the root `Cargo.toml`'s `[workspace.members]` or `[workspace.default-members]`, you might use `cargo build --example stm32g4-160-40`. For a standalone example not in a workspace manifest, building the binary directly is common.)
 
 2. **Flash to your STM32G4 board:**
     (Instructions for flashing will depend on your specific setup, e.g., using `probe-rs` or STM32CubeProgrammer)
 
     ```bash
     # Example with probe-rs (adjust chip as needed, e.g., STM32G431CBUx)
-    probe-rs run --chip STM32G431CBUx target/thumbv7em-none-eabihf/debug/gc9d01_stm32g4_example
+    probe-rs run --chip STM32G431CBUx target/thumbv7em-none-eabihf/debug/stm32g4-160-40
     # or using cargo flash if probe-rs is configured as a runner
-    # cargo flash --chip STM32G431CBUx --target thumbv7em-none-eabihf --bin gc9d01_stm32g4_example
+    # cargo flash --chip STM32G431CBUx --target thumbv7em-none-eabihf --bin stm32g4-160-40
     ```
 
 3. **Monitor serial output:**
@@ -47,7 +47,7 @@ To run this example, ensure you have the necessary Rust toolchain and `embassy-s
 
     ```bash
     probe-rs reset --chip STM32G431CBUx
-    probe-rs attach --chip STM32G431CBUx target/thumbv7em-none-eabihf/debug/gc9d01_stm32g4_example
+    probe-rs attach --chip STM32G431CBUx target/thumbv7em-none-eabihf/debug/stm32g4-160-40
     ```
 
 ## Important Notes

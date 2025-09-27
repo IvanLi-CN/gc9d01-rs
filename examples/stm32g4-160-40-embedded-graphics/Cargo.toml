@@ -1,28 +1,29 @@
 [package]
-name = "gc9d01_stm32g431cbu6_example"
+name = "stm32g4-160-40-embedded-graphics"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
   "defmt",
-  "time-driver-any",
   "stm32g431cb",
+  "time-driver-any",
+  "exti",
   "memory-x",
   "unstable-pac",
-  "exti",
-] }
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
-  "arch-cortex-m",
-  "executor-thread",
-  "defmt",
+  "chrono",
 ] }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
   "defmt",
   "defmt-timestamp-uptime",
   "tick-hz-32_768",
 ] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
+  "arch-cortex-m",
+  "executor-thread",
+  "defmt",
+] }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35" }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
   "defmt",
 ] }
@@ -36,11 +37,13 @@ cortex-m = { version = "0.7.7", features = [
 ] }
 cortex-m-rt = "0.7.5"
 embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 portable-atomic = { version = "1.11.0", features = ["critical-section"] }
 static_cell = "2.0.0"
 
 embedded-graphics = "0.8.1"
+micromath = "2.1.0"
 
 gc9d01 = { version = "*", path = "../../", features = ["async", "defmt"] }
 
@@ -61,7 +64,3 @@ incremental = false
 lto = 'fat'
 opt-level = 3
 overflow-checks = false
-
-[[bin]]
-name = "bq25730_stm32g431cbu6_example"
-path = "src/main.rs"

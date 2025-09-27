@@ -45,12 +45,12 @@ pub trait Timer {
     since = "0.0.2",
     note = "Use Config::frame_bytes() or Config::frame_pixels() instead; this constant will be removed in a future release."
 )]
-pub const FRAME_BUF_SIZE: usize = 160 * 50 * 2; // bytes
+pub const FRAME_BUF_SIZE: usize = 160 * 40 * 2; // bytes (default profile 160x40)
 #[deprecated(
     since = "0.0.2",
     note = "Use Config::frame_pixels() instead; this constant will be removed in a future release."
 )]
-pub const MAX_FRAME_PIXELS: usize = 160 * 50; // pixels
+pub const MAX_FRAME_PIXELS: usize = 160 * 40; // pixels (default profile 160x40)
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -193,9 +193,10 @@ impl Default for Config {
         Self {
             rgb: false,
             inverted: false,
-            orientation: Orientation::Landscape,
-            height: 160,
-            width: 60,
+            // Default to 160x40 profile (logical rendering area)
+            orientation: Orientation::Portrait,
+            height: 40,
+            width: 160,
             dx: 0,
             dy: 0,
         }
@@ -307,12 +308,24 @@ where
         self.write_command(Instruction::PixelFormatSet, &[0x05])
             .await?; // 0x3A
 
-        self.write_command(Instruction::Cmd7E, &[0x7A]).await?; // VGL大小
+        // VGL size (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
+        self.write_command(Instruction::Cmd7E, &[0x7A]).await?; // reference profile
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(Instruction::Cmd7E, &[0x30]).await?; // narrow module profile
 
         // 修改帧频
+        // Frame frequency (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
         self.write_command(
             Instruction::Cmd74,
             &[0x02, 0x0E, 0x00, 0x00, 0x28, 0x00, 0x00],
+        )
+        .await?;
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(
+            Instruction::Cmd74,
+            &[0x05, 0x4D, 0x00, 0x00, 0x01, 0x00, 0x00],
         )
         .await?;
 
@@ -320,122 +333,238 @@ where
         self.write_command(Instruction::Cmd98, &[0x3E]).await?;
         self.write_command(Instruction::Cmd99, &[0x3E]).await?;
 
-        // 内部porch设置
+        // Porch (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
         self.write_command(Instruction::BlankingPorchControl, &[0x0E, 0x0E])
+            .await?; // 0xB5
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(Instruction::BlankingPorchControl, &[0x0D, 0x0D])
             .await?; // 0xB5
 
         // gip timing start
-        self.write_command(Instruction::Cmd60, &[0x38, 0x09, 0x6D, 0x67])
+        // GIP timing (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            self.write_command(Instruction::Cmd60, &[0x38, 0x09, 0x6D, 0x67])
+                .await?;
+            self.write_command(Instruction::Cmd63, &[0x38, 0xAD, 0x6D, 0x67, 0x05])
+                .await?;
+            self.write_command(Instruction::Cmd64, &[0x38, 0x0B, 0x70, 0xAB, 0x6D, 0x67])
+                .await?;
+            self.write_command(Instruction::Cmd66, &[0x38, 0x0F, 0x70, 0xAF, 0x6D, 0x67])
+                .await?;
+            self.write_command(Instruction::Cmd6A, &[0x00, 0x00])
+                .await?;
+            self.write_command(
+                Instruction::Cmd68,
+                &[0x3B, 0x08, 0x04, 0x00, 0x04, 0x64, 0x67],
+            )
             .await?;
-        self.write_command(Instruction::Cmd63, &[0x38, 0xAD, 0x6D, 0x67, 0x05])
+            self.write_command(
+                Instruction::Cmd6C,
+                &[0x22, 0x02, 0x22, 0x02, 0x22, 0x22, 0x50],
+            )
             .await?;
-        self.write_command(Instruction::Cmd64, &[0x38, 0x0B, 0x70, 0xAB, 0x6D, 0x67])
+            self.write_command(
+                Instruction::Cmd6E,
+                &[
+                    0x00, 0x00, 0x00, 0x00, 0x07, 0x01, 0x13, 0x11, 0x0B, 0x09, 0x16, 0x15, 0x1D,
+                    0x1E, 0x00, 0x00, 0x00, 0x00, 0x1E, 0x1D, 0x15, 0x16, 0x0A, 0x0C, 0x12, 0x14,
+                    0x02, 0x08, 0x00, 0x00, 0x00, 0x00,
+                ],
+            )
             .await?;
-        self.write_command(Instruction::Cmd66, &[0x38, 0x0F, 0x70, 0xAF, 0x6D, 0x67])
+        }
+        #[cfg(feature = "panel_160x50")]
+        {
+            self.write_command(Instruction::Cmd60, &[0x38, 0x09, 0x1E, 0x7A])
+                .await?;
+            self.write_command(Instruction::Cmd63, &[0x38, 0xAE, 0x1E, 0x7A])
+                .await?;
+            self.write_command(Instruction::Cmd64, &[0x38, 0x0B, 0x70, 0xAB, 0x1E, 0x7A])
+                .await?;
+            self.write_command(Instruction::Cmd66, &[0x38, 0x0F, 0x70, 0xAF, 0x1E, 0x7A])
+                .await?;
+            self.write_command(
+                Instruction::Cmd68,
+                &[0x00, 0x08, 0x07, 0x00, 0x07, 0x55, 0x6A],
+            )
             .await?;
-        self.write_command(Instruction::Cmd6A, &[0x00, 0x00])
+            self.write_command(Instruction::Cmd6A, &[0x00, 0x00])
+                .await?;
+            self.write_command(
+                Instruction::Cmd6C,
+                &[0x22, 0x02, 0x22, 0x02, 0x22, 0x22, 0x50],
+            )
             .await?;
-        self.write_command(
-            Instruction::Cmd68,
-            &[0x3B, 0x08, 0x04, 0x00, 0x04, 0x64, 0x67],
-        )
-        .await?;
-        self.write_command(
-            Instruction::Cmd6C,
-            &[0x22, 0x02, 0x22, 0x02, 0x22, 0x22, 0x50],
-        )
-        .await?;
-        self.write_command(
-            Instruction::Cmd6E,
-            &[
-                0x00, 0x00, 0x00, 0x00, 0x07, 0x01, 0x13, 0x11, 0x0B, 0x09, 0x16, 0x15, 0x1D, 0x1E,
-                0x00, 0x00, 0x00, 0x00, 0x1E, 0x1D, 0x15, 0x16, 0x0A, 0x0C, 0x12, 0x14, 0x02, 0x08,
-                0x00, 0x00, 0x00, 0x00,
-            ],
-        )
-        .await?;
+            self.write_command(
+                Instruction::Cmd6E,
+                &[
+                    0x00, 0x00, 0x00, 0x02, 0x14, 0x12, 0x0C, 0x0A, 0x1E, 0x1D, 0x08, 0x00, 0x16,
+                    0x15, 0x00, 0x00, 0x00, 0x00, 0x15, 0x16, 0x00, 0x07, 0x1D, 0x1E, 0x09, 0x0B,
+                    0x11, 0x13, 0x01, 0x00, 0x00, 0x00,
+                ],
+            )
+            .await?;
+        }
         // gip timing end
 
-        // 内部电压设定开始
-        self.write_command(Instruction::CmdA9, &[0x1B]).await?;
-        self.write_command(Instruction::CmdA8, &[0x6B]).await?; // 第一次 A8
-        self.write_command(Instruction::CmdA8, &[0x6D]).await?; // 第二次 A8
-        self.write_command(Instruction::CmdA7, &[0x40]).await?;
-        self.write_command(Instruction::CmdAD, &[0x47]).await?;
-        self.write_command(Instruction::CmdAF, &[0x73]).await?; // 第一次 AF
-        self.write_command(Instruction::CmdAF, &[0x73]).await?; // 第二次 AF
-        self.write_command(Instruction::CmdAC, &[0x44]).await?;
-        self.write_command(Instruction::CmdA3, &[0x6C]).await?;
-        self.write_command(Instruction::CmdCB, &[0x00]).await?;
-        self.write_command(Instruction::CmdCD, &[0x22]).await?;
-        self.write_command(Instruction::CmdC2, &[0x10]).await?;
-        self.write_command(Instruction::CmdC5, &[0x00]).await?;
-        self.write_command(Instruction::CmdC6, &[0x0E]).await?;
-        self.write_command(Instruction::CmdC7, &[0x1F]).await?;
-        self.write_command(Instruction::CmdC8, &[0x0E]).await?;
-        // 内部电压设定结束
+        // Internal voltage settings block (present on reference profile only)
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            self.write_command(Instruction::CmdA9, &[0x1B]).await?;
+            self.write_command(Instruction::CmdA8, &[0x6B]).await?;
+            self.write_command(Instruction::CmdA8, &[0x6D]).await?;
+            self.write_command(Instruction::CmdA7, &[0x40]).await?;
+            self.write_command(Instruction::CmdAD, &[0x47]).await?;
+            self.write_command(Instruction::CmdAF, &[0x73]).await?;
+            self.write_command(Instruction::CmdAF, &[0x73]).await?;
+            self.write_command(Instruction::CmdAC, &[0x44]).await?;
+            self.write_command(Instruction::CmdA3, &[0x6C]).await?;
+            self.write_command(Instruction::CmdCB, &[0x00]).await?;
+            self.write_command(Instruction::CmdCD, &[0x22]).await?;
+            self.write_command(Instruction::CmdC2, &[0x10]).await?;
+            self.write_command(Instruction::CmdC5, &[0x00]).await?;
+            self.write_command(Instruction::CmdC6, &[0x0E]).await?;
+            self.write_command(Instruction::CmdC7, &[0x1F]).await?;
+            self.write_command(Instruction::CmdC8, &[0x0E]).await?;
+        }
 
-        // Dual-Single gate select (BFh) - Set to Single gate mode (0x00) - Reverting for test
+        // Dual-Single gate select (common)
         self.write_command(Instruction::DualSingleGateSelect, &[0x00])
-            .await?; // 0xBF, 选择single gate mode
+            .await?; // 0xBF
 
-        // SOU相关调整
+        // SOU (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
         self.write_command(Instruction::CmdF9, &[0x20]).await?;
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(Instruction::CmdF9, &[0x40]).await?;
 
-        // vreg电压调整
+        // vreg / clock / internal voltage tuning (panel-specific portions)
         self.write_command(Instruction::Cmd9B, &[0x3B]).await?;
         self.write_command(Instruction::Cmd93, &[0x33, 0x7F, 0x00])
             .await?;
-
-        // VGH/VGL CLK调整 70, 71h
-        self.write_command(Instruction::Cmd70, &[0x0E, 0x0F, 0x03, 0x0E, 0x0F, 0x03])
-            .await?;
-        self.write_command(Instruction::Cmd71, &[0x0E, 0x16, 0x03])
-            .await?;
-
-        // 内部电压调整
         self.write_command(Instruction::Cmd91, &[0x0E, 0x09])
             .await?;
 
-        // vreg电压调整
-        self.write_command(Instruction::PowerControl2, &[0x2C])
-            .await?; // 0xC3
-        self.write_command(Instruction::PowerControl3, &[0x1A])
-            .await?; // 0xC4
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            self.write_command(Instruction::Cmd70, &[0x0E, 0x0F, 0x03, 0x0E, 0x0F, 0x03])
+                .await?;
+            self.write_command(Instruction::Cmd71, &[0x0E, 0x16, 0x03])
+                .await?;
+            self.write_command(Instruction::PowerControl2, &[0x2C])
+                .await?; // 0xC3
+            self.write_command(Instruction::PowerControl3, &[0x1A])
+                .await?; // 0xC4
+        }
+        #[cfg(feature = "panel_160x50")]
+        {
+            self.write_command(Instruction::Cmd70, &[0x04, 0x02, 0x0D, 0x04, 0x02, 0x0D])
+                .await?;
+            self.write_command(Instruction::Cmd71, &[0x04, 0x02, 0x0D])
+                .await?;
+            self.write_command(Instruction::PowerControl2, &[0x26])
+                .await?; // 0xC3
+            self.write_command(Instruction::PowerControl3, &[0x26])
+                .await?; // 0xC4
+            self.write_command(Instruction::PowerControl4, &[0x1C])
+                .await?; // 0xC9
+        }
 
         // gamma F0~F3h (注意伪代码中F0, F2, F1, F3的顺序)
-        self.write_command(
-            Instruction::SetGamma1,
-            &[0x51, 0x13, 0x0C, 0x06, 0x00, 0x2F],
-        )
-        .await?; // 0xF0
-        self.write_command(
-            Instruction::SetGamma3,
-            &[0x51, 0x13, 0x0C, 0x06, 0x00, 0x33],
-        )
-        .await?; // 0xF2
-        self.write_command(
-            Instruction::SetGamma2,
-            &[0x3C, 0x94, 0x4F, 0x33, 0x34, 0xCF], // Corrected 0CF to 0xCF
-        )
-        .await?; // 0xF1
-        self.write_command(
-            Instruction::SetGamma4,
-            &[0x4D, 0x94, 0x4F, 0x33, 0x34, 0xCF],
-        )
-        .await?; // 0xF3
+        // Gamma (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            self.write_command(
+                Instruction::SetGamma1,
+                &[0x51, 0x13, 0x0C, 0x06, 0x00, 0x2F],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma3,
+                &[0x51, 0x13, 0x0C, 0x06, 0x00, 0x33],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma2,
+                &[0x3C, 0x94, 0x4F, 0x33, 0x34, 0xCF],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma4,
+                &[0x4D, 0x94, 0x4F, 0x33, 0x34, 0xCF],
+            )
+            .await?;
+        }
+        #[cfg(feature = "panel_160x50")]
+        {
+            self.write_command(
+                Instruction::SetGamma1,
+                &[0x02, 0x03, 0x0A, 0x06, 0x00, 0x1A],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma3,
+                &[0x02, 0x03, 0x0A, 0x06, 0x00, 0x1A],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma2,
+                &[0x38, 0x78, 0x1B, 0x2E, 0x2F, 0xC8],
+            )
+            .await?;
+            self.write_command(
+                Instruction::SetGamma4,
+                &[0x38, 0x74, 0x12, 0x2E, 0x2F, 0xDF],
+            )
+            .await?;
+        }
 
-        // Memory access control - use fixed value as in working example
-        // This ensures consistent behavior regardless of orientation
-        // Orientation will be handled by coordinate transformation
-        self.write_command(Instruction::MemoryAccessControl, &[0x40]) // Fixed value as in reference document
+        // Inversion (0xEC) differs
+        #[cfg(not(feature = "panel_160x50"))]
+        self.write_command(Instruction::Inversion, &[0x11]).await?;
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(Instruction::Inversion, &[0x00]).await?;
+
+        // Memory access control (panel-specific)
+        #[cfg(not(feature = "panel_160x50"))]
+        self.write_command(Instruction::MemoryAccessControl, &[0x40])
+            .await?; // 0x36
+        #[cfg(feature = "panel_160x50")]
+        self.write_command(Instruction::MemoryAccessControl, &[0x00])
             .await?; // 0x36
 
-        self.write_command(
-            Instruction::DisplayFunctionControl,
-            &[0x0A, 0x80, 0x27, 0x00],
-        ) // Set Source Driver Output Scan Direction to Reverse, Gate Driver to Normal (0x80)
-        .await?; // 0xB6
+        // For the 160x50 narrow module, set initial address window to match the
+        // vendor sample exactly: columns 0x000F..0x0040 (50px with X_OFFSET=15),
+        // rows 0x0000..0x009F (160px), then proceed to sleep-out/display-on.
+        #[cfg(feature = "panel_160x50")]
+        {
+            let sx: u16 = self.config.dx; // 15
+            let ex: u16 = self.config.dx + 50 - 1; // 15+49=64
+            let sy: u16 = self.config.dy; // 0
+            let ey: u16 = self.config.dy + 160 - 1; // 159
+            self.write_command(
+                Instruction::ColumnAddressSet,
+                &[(sx >> 8) as u8, sx as u8, (ex >> 8) as u8, ex as u8],
+            )
+            .await?;
+            self.write_command(
+                Instruction::RowAddressSet,
+                &[(sy >> 8) as u8, sy as u8, (ey >> 8) as u8, ey as u8],
+            )
+            .await?;
+        }
+
+        // Display function control only for reference-style profile
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            self.write_command(
+                Instruction::DisplayFunctionControl,
+                &[0x0A, 0x80, 0x27, 0x00],
+            )
+            .await?; // 0xB6
+        }
 
         self.write_command(Instruction::SleepOut, &[]).await?; // 0x11
         #[allow(unused_must_use)]
@@ -509,14 +638,18 @@ where
         }
     }
 
-    /// Physical (column x row) dimensions used for address window and buffer layout.
-    ///
-    /// For this panel and initialization (MADCTL = 0x40 without MV), the column
-    /// address spans the logical width and the row address spans the logical height.
-    /// So we keep (width, height) regardless of orientation and do rotation in
-    /// coordinate transform only.
     fn physical_dimensions(&self) -> (u16, u16) {
-        (self.config.width, self.config.height)
+        #[cfg(feature = "panel_160x50")]
+        {
+            // Narrow module: physical addressing is 50 (columns) x 160 (rows)
+            // Column addressing (2Ah) uses the short side with an X offset.
+            (50, 160)
+        }
+        #[cfg(not(feature = "panel_160x50"))]
+        {
+            // Reference-style panel: physical matches logical
+            (self.config.width, self.config.height)
+        }
     }
 
     pub async fn set_address_window(
@@ -649,14 +782,20 @@ where
     pub async fn flush(&mut self) -> Result<(), Error<BusE, PinE>> {
         // Set address window for the entire physical screen
         let (phys_w, phys_h) = self.physical_dimensions();
+        // Use configured dx/dy offsets so the flush window matches the panel's
+        // active region (important for 160x50 modules with X offset).
+        let sx = self.config.dx;
+        let sy = self.config.dy;
+        let ex = sx + phys_w - 1;
+        let ey = sy + phys_h - 1;
         self.write_command(
             Instruction::ColumnAddressSet,
-            &[0, 0, ((phys_w - 1) >> 8) as u8, ((phys_w - 1) & 0xFF) as u8],
+            &[(sx >> 8) as u8, sx as u8, (ex >> 8) as u8, ex as u8],
         )
         .await?;
         self.write_command(
             Instruction::RowAddressSet,
-            &[0, 0, ((phys_h - 1) >> 8) as u8, ((phys_h - 1) & 0xFF) as u8],
+            &[(sy >> 8) as u8, sy as u8, (ey >> 8) as u8, ey as u8],
         )
         .await?;
         self.write_command(Instruction::MemoryWrite, &[]).await?;
