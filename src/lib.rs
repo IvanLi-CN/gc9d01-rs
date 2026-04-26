@@ -634,7 +634,7 @@ where
             Orientation::Portrait => (phys_w - 1 - y, phys_h - 1 - x),
             Orientation::Landscape => (y, phys_h - 1 - x),
             Orientation::PortraitSwapped => (x, y),
-            Orientation::LandscapeSwapped => (y, phys_h - 1 - x),
+            Orientation::LandscapeSwapped => (phys_w - 1 - y, x),
         }
     }
 
